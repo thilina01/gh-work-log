@@ -1,0 +1,8 @@
+{
+  "emails": ["me@example.com"],
+  "excludeOrgs": ["OTR-LANKA"],
+  "excludeRepos": ["thilina01/spring-seed"],
+  "branchPatterns": ["glob:feature/*", "prefix:release/"],
+  "scanFeatureBranches": true,
+  "detectWip": true
+}
