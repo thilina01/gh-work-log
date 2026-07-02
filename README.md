@@ -252,13 +252,15 @@ Time semantics:
 - `until` is exclusive
 - filtering is based on authored timestamp, not committed timestamp
 - date-only inputs are normalized to UTC day boundaries
+- date-only `until` values are advanced to the next UTC day boundary, so `--until 2026-04-01` includes commits authored on April 1
+  and stores the normalized upper bound as `2026-04-02T00:00:00.000Z`
 
 Repository discovery:
 
 - Repositories are discovered through explicit GitHub API queries available to the authenticated identity
 - Include filters are applied first
 - Exclude filters are applied second
-- Disabled, empty, or metadata-broken repositories are skipped with reasons
+- Disabled repositories, empty repositories, and repositories missing default branch metadata are skipped with reasons
 
 Branch handling:
 
@@ -375,7 +377,8 @@ The generated dashboard currently includes:
 The `All Commits` tab supports:
 
 - full-width table rendering
-- repository, branch, WIP, and free-text filters
+- repository, canonical branch, WIP, and free-text filters
+- free-text search includes repository, canonical branch, scan branch, SHA, and message text
 - show/hide column controls
 - sorting on `Authored` and `Repository`
 - clickable SHA links that open the commit on GitHub
