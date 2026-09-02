@@ -208,7 +208,10 @@ export function renderCommitsTab(report: RunResult): string {
               <h2 class="section-title">All Commits</h2>
               <p class="section-copy">This full-width explorer renders the complete commit dataset and keeps every row available under filtering.</p>
             </div>
-            <div class="chip" id="commit-count-chip">${formatNumber(report.data.length)} rows</div>
+            <div class="header-actions">
+              <div class="chip" id="commit-count-chip">${formatNumber(report.data.length)} rows</div>
+              <button id="export-csv-button" class="export-button" type="button">Export CSV</button>
+            </div>
           </div>
           <div class="filter-row">
             <input id="commit-search" type="search" placeholder="Search repo, branch, scan branch, sha, or message" />

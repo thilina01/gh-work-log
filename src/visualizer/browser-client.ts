@@ -53,6 +53,7 @@ const searchInput = requireElement<HTMLInputElement>("commit-search");
 const tableBody = requireElement<HTMLElement>("commit-table-body");
 const resultsMeta = requireElement<HTMLElement>("commit-results-meta");
 const countChip = requireElement<HTMLElement>("commit-count-chip");
+const exportButton = requireElement<HTMLButtonElement>("export-csv-button");
 const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-button"));
 const tabPanels = Array.from(document.querySelectorAll<HTMLElement>(".tab-panel"));
 const columnControls = Array.from(document.querySelectorAll<HTMLInputElement>("[data-column-toggle]"));
@@ -97,6 +98,62 @@ for (const author of authors) {
   option.value = author;
   option.textContent = author;
   authorFilter.appendChild(option);
+}
+
+interface ExportColumn {
+  key: string;
+  header: string;
+  getValue: (row: DashboardCommitRow) => string;
+}
+
+const exportColumns: ExportColumn[] = [
+  { key: "authored", header: "Authored", getValue: (row) => new Date(row.authoredDateTime).toLocaleString() },
+  { key: "repository", header: "Repository", getValue: (row) => row.repository },
+  { key: "branch", header: "Branch", getValue: (row) => row.branch },
+  { key: "scanBranch", header: "Scan Branch", getValue: (row) => row.scanBranch },
+  { key: "sha", header: "SHA", getValue: (row) => row.sha },
+  { key: "message", header: "Message", getValue: (row) => row.message },
+  { key: "wip", header: "WIP", getValue: (row) => (row.isWip ? "WIP" : "No") },
+  { key: "merge", header: "Merge", getValue: (row) => (row.isMergeCommit ? "Merge" : "No") },
+  { key: "mergeAuthor", header: "Author", getValue: (row) => resolveAuthorLabel(row) ?? "" },
+];
+
+let lastFilteredRows: DashboardCommitRow[] = [];
+
+function csvEscape(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return '"' + value.replaceAll('"', '""') + '"';
+  }
+
+  return value;
+}
+
+function exportFilteredCommitsToCsv(): void {
+  const hiddenColumns = new Set(
+    columnControls
+      .filter((control) => !control.checked)
+      .map((control) => control.getAttribute("data-column-toggle")),
+  );
+  const columns = exportColumns.filter((column) => !hiddenColumns.has(column.key));
+  if (columns.length === 0 || lastFilteredRows.length === 0) {
+    return;
+  }
+
+  const lines = [columns.map((column) => csvEscape(column.header)).join(",")];
+  for (const row of lastFilteredRows) {
+    lines.push(columns.map((column) => csvEscape(column.getValue(row))).join(","));
+  }
+
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `gh-work-log-commits-${timestamp}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function escapeBrowserHtml(value: string): string {
@@ -195,6 +252,9 @@ function renderRows(): void {
     return haystack.includes(query);
   }).sort(compareRows);
 
+  lastFilteredRows = filtered;
+  exportButton.disabled = filtered.length === 0;
+
   tableBody.innerHTML = filtered.map((row) => {
     const shortSha = row.sha.slice(0, 8);
     const badge = row.isWip
@@ -272,6 +332,7 @@ wipFilter.addEventListener("change", renderRows);
 mergeFilter.addEventListener("change", renderRows);
 externalAuthorFilter.addEventListener("change", renderRows);
 searchInput.addEventListener("input", renderRows);
+exportButton.addEventListener("click", exportFilteredCommitsToCsv);
 
 for (const button of tabButtons) {
   button.addEventListener("click", () => {

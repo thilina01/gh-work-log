@@ -523,6 +523,38 @@ export const VISUALIZER_STYLES = `
         background: rgba(22, 33, 48, 0.92);
       }
 
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .export-button {
+        appearance: none;
+        border: 1px solid var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
+        padding: 8px 14px;
+        border-radius: 999px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+
+      .export-button:hover {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .export-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
       .empty {
         padding: 16px;
         border-radius: 16px;
