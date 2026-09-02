@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "none",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "alwaysStrict": false,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": [],
+    "rootDir": "src/visualizer",
+    "outDir": "src/visualizer",
+    "declaration": false
+  },
+  "include": ["src/visualizer/browser-client.ts"],
+  "exclude": []
+}

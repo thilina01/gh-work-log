@@ -12,6 +12,7 @@ import {
 } from "../types";
 import { Logger } from "../logger";
 import { isWithinRange, toUtcIso } from "../utils/dates";
+import { optionalBoolean, optionalString, requiredString } from "../utils/validation";
 
 const REST_API_VERSION = "2022-11-28";
 const PAGE_SIZE = 100;
@@ -578,31 +579,33 @@ function isTargetAuthor(
   return Boolean(author.email && target.emails.includes(author.email));
 }
 
-function mapRepository(value: unknown): RepositoryRecord {
-  const item = value as {
-    full_name: string;
-    name: string;
-    owner?: { login?: string };
-    visibility?: string;
-    default_branch?: string | null;
-    archived?: boolean;
-    fork?: boolean;
-    disabled?: boolean;
-    private?: boolean;
-    html_url?: string;
-  };
+export function mapRepository(value: unknown): RepositoryRecord {
+  if (!value || typeof value !== "object") {
+    throw new Error("Expected repository payload to be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const context = "repository payload";
+
+  const fullName = requiredString(record.full_name, "full_name", context);
+  const name = requiredString(record.name, "name", context);
+  const owner = record.owner;
+  const ownerLogin =
+    (owner && typeof owner === "object"
+      ? optionalString((owner as Record<string, unknown>).login, "owner.login", context)
+      : undefined) ?? fullName.split("/")[0] ?? "";
 
   return {
-    fullName: item.full_name,
-    ownerLogin: item.owner?.login ?? item.full_name?.split("/")[0] ?? "",
-    name: item.name,
-    visibility: item.visibility ?? "unknown",
-    defaultBranch: item.default_branch ?? null,
-    isArchived: Boolean(item.archived),
-    isFork: Boolean(item.fork),
-    isDisabled: Boolean(item.disabled),
-    isPrivate: Boolean(item.private),
-    htmlUrl: item.html_url ?? `https://github.com/${item.full_name}`,
+    fullName,
+    ownerLogin,
+    name,
+    visibility: optionalString(record.visibility, "visibility", context) ?? "unknown",
+    defaultBranch: optionalString(record.default_branch, "default_branch", context) ?? null,
+    isArchived: Boolean(optionalBoolean(record.archived, "archived", context)),
+    isFork: Boolean(optionalBoolean(record.fork, "fork", context)),
+    isDisabled: Boolean(optionalBoolean(record.disabled, "disabled", context)),
+    isPrivate: Boolean(optionalBoolean(record.private, "private", context)),
+    htmlUrl: optionalString(record.html_url, "html_url", context) ?? `https://github.com/${fullName}`,
   };
 }
 

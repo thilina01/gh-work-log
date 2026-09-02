@@ -114,7 +114,13 @@ export interface FailureRecord {
   retryCount: number;
 }
 
-export interface CommitObservation {
+export interface CommitDiffStats {
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+}
+
+export interface CommitObservation extends Partial<CommitDiffStats> {
   repository: string;
   defaultBranch: string;
   scanBranch: string;
@@ -130,18 +136,9 @@ export interface CommitObservation {
   parentCount: number;
   mergeIncludesExternalAuthor: boolean;
   mergeBranchAuthorLogin: string | null;
-  additions?: number;
-  deletions?: number;
-  filesChanged?: number;
 }
 
-export interface CommitDiffStats {
-  additions: number;
-  deletions: number;
-  filesChanged: number;
-}
-
-export interface CommitRecord {
+export interface CommitRecord extends Partial<CommitDiffStats> {
   repository: string;
   branch: string;
   scanBranch: string;
@@ -159,9 +156,6 @@ export interface CommitRecord {
   isMergeCommit: boolean;
   mergeIncludesExternalAuthor: boolean;
   mergeBranchAuthorLogin: string | null;
-  additions?: number;
-  deletions?: number;
-  filesChanged?: number;
   messageCategory?: MessageCategory;
 }
 
@@ -220,6 +214,12 @@ export interface MessageCategorySummary {
 
 export interface DiscoverySummary {
   repositoriesDiscovered: number;
+  /**
+   * Repositories that passed org/repo/owned-only filtering, counted before
+   * the per-repository viability checks (disabled repository, missing
+   * default branch) that can still move a repository into
+   * `skippedRepositories`.
+   */
   repositoriesIncluded: number;
 }
 

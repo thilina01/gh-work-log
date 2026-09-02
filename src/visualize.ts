@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { renderHtmlReport } from "./visualizer/render";
 import { RunResult } from "./types";
+import { splitFlagToken } from "./utils/cli-tokens";
+import { toErrorMessage } from "./utils/errors";
+import { writeFileEnsuringDir } from "./utils/files";
+import { replaceExtension } from "./utils/paths";
 
 interface VisualizeOptions {
   input?: string;
@@ -28,13 +32,11 @@ async function main(): Promise<void> {
     const report = parseReport(await readFile(inputPath, "utf8"));
     const html = renderHtmlReport(report);
 
-    await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, html, "utf8");
+    await writeFileEnsuringDir(outputPath, html);
 
     process.stdout.write(`Wrote HTML report to ${outputPath}\n`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`${message}\n`);
+    process.stderr.write(`${toErrorMessage(error)}\n`);
     process.exitCode = 1;
   }
 }
@@ -55,7 +57,7 @@ function parseArgs(argv: string[]): VisualizeOptions {
       continue;
     }
 
-    const [flag, inlineValue] = splitToken(token);
+    const [flag, inlineValue] = splitFlagToken(token);
     const value = inlineValue ?? argv[index + 1];
 
     if (flag === "--input") {
@@ -82,15 +84,6 @@ function parseArgs(argv: string[]): VisualizeOptions {
   return options;
 }
 
-function splitToken(token: string): [string, string | undefined] {
-  const separatorIndex = token.indexOf("=");
-  if (separatorIndex === -1) {
-    return [token, undefined];
-  }
-
-  return [token.slice(0, separatorIndex), token.slice(separatorIndex + 1)];
-}
-
 function renderHelp(): string {
   return [
     "Usage: npm run visualize -- --input <report.json> [--output <report.html>]",
@@ -100,11 +93,6 @@ function renderHelp(): string {
     "  --output    Destination HTML path",
     "  --help      Show this help text",
   ].join("\n");
-}
-
-function replaceExtension(filePath: string, extension: string): string {
-  const parsed = path.parse(filePath);
-  return path.join(parsed.dir, `${parsed.name}${extension}`);
 }
 
 function parseReport(value: string): RunResult {

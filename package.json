@@ -10,9 +10,10 @@
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "generate:browser-client": "tsc -p tsconfig.browser-client.json",
+    "build": "npm run clean && tsc -p tsconfig.json && node -e \"require('fs').copyFileSync('src/visualizer/browser-client.js', 'dist/visualizer/browser-client.js')\"",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit && tsc -p tsconfig.browser-client.json --noEmit",
     "visualize": "node dist/visualize.js",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import {
   loadLocalConfigFile,
   mergeCliOptions,
@@ -10,6 +8,9 @@ import {
   renderHelp,
 } from "./config";
 import { runApp } from "./app";
+import { toErrorMessage } from "./utils/errors";
+import { writeFileEnsuringDir } from "./utils/files";
+import { replaceExtension } from "./utils/paths";
 import { renderHtmlReport } from "./visualizer/render";
 
 async function main(): Promise<void> {
@@ -29,12 +30,11 @@ async function main(): Promise<void> {
 
     if (options.html) {
       const htmlPath = replaceExtension(config.outputPath, ".html");
-      await mkdir(path.dirname(htmlPath), { recursive: true });
-      await writeFile(htmlPath, renderHtmlReport(result), "utf8");
+      await writeFileEnsuringDir(htmlPath, renderHtmlReport(result));
       process.stdout.write(`Wrote HTML report to ${htmlPath}\n`);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     if (message) {
       process.stderr.write(`${message}\n`);
     } else {
@@ -42,11 +42,6 @@ async function main(): Promise<void> {
     }
     process.exitCode = 1;
   }
-}
-
-function replaceExtension(filePath: string, extension: string): string {
-  const parsed = path.parse(filePath);
-  return path.join(parsed.dir, `${parsed.name}${extension}`);
 }
 
 void main();

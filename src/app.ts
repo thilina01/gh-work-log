@@ -1,5 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { buildRunResult } from "./aggregation";
 import { GitHubApiError, GitHubClient } from "./github/client";
 import { Logger } from "./logger";
@@ -14,6 +12,9 @@ import {
   TargetIdentity,
 } from "./types";
 import { mapLimit } from "./utils/async";
+import { groupBy, parseRepositoryShaKey, repositoryShaKey } from "./utils/collections";
+import { toErrorMessage } from "./utils/errors";
+import { writeFileEnsuringDir } from "./utils/files";
 import { matchesBranch } from "./utils/patterns";
 
 export interface AppDependencies {
@@ -81,7 +82,7 @@ export async function runApp(
     config,
   );
   logger.info(
-    `Repository discovery complete: ${discoveredRepositories.length} discovered, ${filtered.included.length} included, ${filtered.skipped.length} skipped`,
+    `Repository discovery complete: ${discoveredRepositories.length} discovered, ${filtered.passedFilters.length} included, ${filtered.skipped.length} skipped`,
   );
 
   const repositoryMap = new Map(
@@ -94,7 +95,7 @@ export async function runApp(
       authenticatedUser: authenticatedUser.login,
       targetAuthor: targetIdentity.login,
       repositoriesDiscovered: discoveredRepositories.length,
-      repositoriesIncluded: filtered.included.length,
+      repositoriesIncluded: filtered.passedFilters.length,
       scannedRepositoryCount: 0,
       observations: [],
       repositoryMap,
@@ -141,7 +142,7 @@ export async function runApp(
     authenticatedUser: authenticatedUser.login,
     targetAuthor: targetIdentity.login,
     repositoriesDiscovered: discoveredRepositories.length,
-    repositoriesIncluded: filtered.included.length,
+    repositoriesIncluded: filtered.passedFilters.length,
     scannedRepositoryCount: filtered.scannable.length,
     observations,
     repositoryMap,
@@ -163,11 +164,16 @@ export function filterRepositories(
   authenticatedLogin: string,
   config: NormalizedConfig,
 ): {
-  included: RepositoryRecord[];
+  // Repositories that passed org/repo include-exclude and owned-only
+  // filtering. This is NOT "repositories we proceeded to scan" -- the
+  // disabled/missing-default-branch checks below can still move one of
+  // these into `skipped`. Kept as the source for `discovery.repositoriesIncluded`
+  // in the JSON/HTML output; that external field name is unchanged.
+  passedFilters: RepositoryRecord[];
   scannable: RepositoryRecord[];
   skipped: SkippedRepository[];
 } {
-  const included: RepositoryRecord[] = [];
+  const passedFilters: RepositoryRecord[] = [];
   const scannable: RepositoryRecord[] = [];
   const skipped: SkippedRepository[] = [];
 
@@ -218,7 +224,7 @@ export function filterRepositories(
       continue;
     }
 
-    included.push(repository);
+    passedFilters.push(repository);
 
     if (repository.isDisabled) {
       skipped.push({
@@ -239,7 +245,7 @@ export function filterRepositories(
     scannable.push(repository);
   }
 
-  return { included, scannable, skipped };
+  return { passedFilters, scannable, skipped };
 }
 
 async function scanRepository(params: {
@@ -322,24 +328,13 @@ async function enrichDiffStats(
   logger: Logger,
 ): Promise<FailureRecord[]> {
   const failures: FailureRecord[] = [];
-  const grouped = new Map<string, CommitObservation[]>();
-
-  for (const observation of observations) {
-    const key = `${observation.repository}:${observation.sha}`;
-    const bucket = grouped.get(key);
-    if (bucket) {
-      bucket.push(observation);
-    } else {
-      grouped.set(key, [observation]);
-    }
-  }
+  const grouped = groupBy(observations, (observation) =>
+    repositoryShaKey(observation.repository, observation.sha),
+  );
 
   const entries = Array.from(grouped.entries());
   await mapLimit(entries, concurrency, async ([key, group]) => {
-    const separatorIndex = key.lastIndexOf(":");
-    const repositoryName =
-      separatorIndex === -1 ? "" : key.slice(0, separatorIndex);
-    const sha = separatorIndex === -1 ? "" : key.slice(separatorIndex + 1);
+    const { repository: repositoryName, sha } = parseRepositoryShaKey(key);
     const repository = repositoryMap.get(repositoryName);
     if (!repository || !sha) {
       return;
@@ -370,17 +365,15 @@ function toFailure(
     return error.toFailure(repository, stage);
   }
 
-  const message = error instanceof Error ? error.message : String(error);
   return {
     repository,
     stage,
     errorType: "unexpected_error",
-    message,
+    message: toErrorMessage(error),
     retryCount: 0,
   };
 }
 
 async function defaultWriteJson(outputPath: string, result: RunResult): Promise<void> {
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  await writeFileEnsuringDir(outputPath, `${JSON.stringify(result, null, 2)}\n`);
 }

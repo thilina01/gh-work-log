@@ -398,10 +398,14 @@ function renderLineChart<T extends object>(
   const values = points.map((point) => Number(point[valueKey] ?? 0));
   const max = Math.max(...values, 1);
   const step = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+  const coordinatesOf = (point: T, index: number): { x: number; y: number } => {
+    const x = padding + step * index;
+    const y = height - padding - ((Number(point[valueKey] ?? 0) / max) * (height - padding * 2));
+    return { x, y };
+  };
   const polyline = points
     .map((point, index) => {
-      const x = padding + step * index;
-      const y = height - padding - ((Number(point[valueKey] ?? 0) / max) * (height - padding * 2));
+      const { x, y } = coordinatesOf(point, index);
       return `${x},${y}`;
     })
     .join(" ");
@@ -420,8 +424,7 @@ function renderLineChart<T extends object>(
     <polyline fill="none" stroke="${stroke}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />
     ${points
       .map((point, index) => {
-        const x = padding + step * index;
-        const y = height - padding - ((Number(point[valueKey] ?? 0) / max) * (height - padding * 2));
+        const { x, y } = coordinatesOf(point, index);
         return `<circle cx="${x}" cy="${y}" r="3.8" fill="${stroke}"></circle>`;
       })
       .join("")}

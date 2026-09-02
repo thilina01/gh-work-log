@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectExternalMergeAuthor, resolveMergeBranchAuthorLogin } from "../../src/github/client";
+import {
+  detectExternalMergeAuthor,
+  mapRepository,
+  resolveMergeBranchAuthorLogin,
+} from "../../src/github/client";
 import { TargetIdentity } from "../../src/types";
 
 const target: TargetIdentity = {
@@ -114,5 +118,62 @@ describe("resolveMergeBranchAuthorLogin", () => {
         nodes: [{ author: { email: "alice@example.com", user: { login: "alice" } } }],
       }),
     ).toBeNull();
+  });
+});
+
+describe("mapRepository", () => {
+  it("maps a well-formed payload", () => {
+    expect(
+      mapRepository({
+        full_name: "org/service",
+        name: "service",
+        owner: { login: "org" },
+        visibility: "private",
+        default_branch: "main",
+        archived: false,
+        fork: false,
+        disabled: false,
+        private: true,
+        html_url: "https://github.com/org/service",
+      }),
+    ).toEqual({
+      fullName: "org/service",
+      ownerLogin: "org",
+      name: "service",
+      visibility: "private",
+      defaultBranch: "main",
+      isArchived: false,
+      isFork: false,
+      isDisabled: false,
+      isPrivate: true,
+      htmlUrl: "https://github.com/org/service",
+    });
+  });
+
+  it("throws when full_name is missing", () => {
+    expect(() => mapRepository({ name: "service" })).toThrow(
+      'Expected "full_name" in repository payload to be a string.',
+    );
+  });
+
+  it("throws when a field has the wrong type", () => {
+    expect(() =>
+      mapRepository({ full_name: "org/service", name: "service", archived: "yes" }),
+    ).toThrow('Expected "archived" in repository payload to be a boolean.');
+  });
+
+  it("falls back to defaults for missing optional fields", () => {
+    expect(mapRepository({ full_name: "org/service", name: "service" })).toEqual({
+      fullName: "org/service",
+      ownerLogin: "org",
+      name: "service",
+      visibility: "unknown",
+      defaultBranch: null,
+      isArchived: false,
+      isFork: false,
+      isDisabled: false,
+      isPrivate: false,
+      htmlUrl: "https://github.com/org/service",
+    });
   });
 });

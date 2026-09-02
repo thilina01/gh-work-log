@@ -1,33 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  BOOLEAN_FLAGS,
+  DEFAULT_LOCAL_CONFIG_FILE,
+  DEFAULT_OUTPUT_DIR,
+  FLAG_BY_TOKEN,
+  FLAG_DEFINITIONS,
+  HELP_SECTION_ORDER,
+  LIST_FLAGS,
+  LOCAL_CONFIG_ALLOWED_KEYS,
+  SINGLE_VALUE_FLAGS,
+} from "./cli-flags";
 import { CliOptions, LocalConfigFile, NormalizedConfig } from "./types";
+import { splitFlagToken } from "./utils/cli-tokens";
 import { assertSinceBeforeUntil, parseSince, parseUntil } from "./utils/dates";
+import { toErrorMessage } from "./utils/errors";
 import { compileBranchPatterns } from "./utils/patterns";
+import { optionalBoolean, optionalString, optionalStringArray } from "./utils/validation";
 
-export const DEFAULT_LOCAL_CONFIG_FILE = ".gh-work-log.local.json";
-export const DEFAULT_OUTPUT_DIR = "tmp";
-
-const BOOLEAN_FLAGS = new Set([
-  "--owned-only",
-  "--scan-feature-branches",
-  "--include-diff-stats",
-  "--detect-wip",
-  "--classify-messages",
-  "--verbose",
-  "--dry-run",
-  "--html",
-  "--help",
-]);
-
-const SINGLE_VALUE_FLAGS = new Set(["--since", "--until", "--output", "--author"]);
-const LIST_FLAGS = new Set([
-  "--emails",
-  "--include-org",
-  "--exclude-org",
-  "--include-repo",
-  "--exclude-repo",
-  "--branch-pattern",
-]);
+export { DEFAULT_LOCAL_CONFIG_FILE, DEFAULT_OUTPUT_DIR };
 
 export function parseCliArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
@@ -58,7 +49,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
       throw new Error(`Unexpected argument "${token}".`);
     }
 
-    const [flag, inlineValue] = splitInlineValue(token);
+    const [flag, inlineValue] = splitFlagToken(token);
 
     if (BOOLEAN_FLAGS.has(flag)) {
       setBooleanFlag(options, flag);
@@ -103,8 +94,7 @@ export function loadLocalConfigFile(
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to parse ${fileName}: ${message}`);
+    throw new Error(`Failed to parse ${fileName}: ${toErrorMessage(error)}`);
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -118,40 +108,34 @@ export function mergeCliOptions(
   cliOptions: CliOptions,
   localConfig: LocalConfigFile,
 ): CliOptions {
-  return {
-    since: cliOptions.since,
-    until: cliOptions.until,
-    output: cliOptions.output,
-    author: cliOptions.author ?? localConfig.author,
-    emails: [...(localConfig.emails ?? []), ...cliOptions.emails],
-    includeOrgs: [...(localConfig.includeOrgs ?? []), ...cliOptions.includeOrgs],
-    excludeOrgs: [...(localConfig.excludeOrgs ?? []), ...cliOptions.excludeOrgs],
-    includeRepos: [...(localConfig.includeRepos ?? []), ...cliOptions.includeRepos],
-    excludeRepos: [...(localConfig.excludeRepos ?? []), ...cliOptions.excludeRepos],
-    branchPatterns: [
-      ...(localConfig.branchPatterns ?? []),
-      ...cliOptions.branchPatterns,
-    ],
-    ownedOnly: Boolean(localConfig.ownedOnly) || cliOptions.ownedOnly,
-    scanFeatureBranches:
-      Boolean(localConfig.scanFeatureBranches) || cliOptions.scanFeatureBranches,
-    includeDiffStats:
-      Boolean(localConfig.includeDiffStats) || cliOptions.includeDiffStats,
-    detectWip: Boolean(localConfig.detectWip) || cliOptions.detectWip,
-    classifyMessages:
-      Boolean(localConfig.classifyMessages) || cliOptions.classifyMessages,
-    verbose: Boolean(localConfig.verbose) || cliOptions.verbose,
-    dryRun: cliOptions.dryRun,
-    html: cliOptions.html,
-    help: cliOptions.help,
-  };
+  const merged: CliOptions = { ...cliOptions };
+
+  for (const definition of FLAG_DEFINITIONS) {
+    if (!definition.localConfigKey) {
+      continue;
+    }
+
+    const localValue = localConfig[definition.localConfigKey];
+    if (localValue === undefined) {
+      continue;
+    }
+
+    if (definition.kind === "list") {
+      merged[definition.cliKey] = [
+        ...(localValue as string[]),
+        ...cliOptions[definition.cliKey],
+      ];
+    } else if (definition.kind === "boolean") {
+      merged[definition.cliKey] = Boolean(localValue) || cliOptions[definition.cliKey];
+    } else {
+      merged[definition.cliKey] = cliOptions[definition.cliKey] ?? (localValue as string);
+    }
+  }
+
+  return merged;
 }
 
 export function normalizeConfig(options: CliOptions): NormalizedConfig {
-  if (options.help) {
-    throw new Error("");
-  }
-
   if (!options.since || !options.until) {
     throw new Error("`--since` and `--until` are required.");
   }
@@ -189,52 +173,21 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
 }
 
 export function renderHelp(): string {
-  return [
+  const lines: string[] = [
     "Usage: gh-work-log --since <iso|date> --until <iso|date> [--output <file>] [options]",
     `Optional local defaults: ${DEFAULT_LOCAL_CONFIG_FILE}`,
-    "",
-    "Required:",
-    "  --since                  Inclusive authored-date lower bound",
-    "  --until                  Exclusive authored-date upper bound",
-    "",
-    "Output:",
-    `  --output                 Output JSON path (default: ${DEFAULT_OUTPUT_DIR}/report-<since>-<until>.json)`,
-    "",
-    "Identity:",
-    "  --author                 Override target GitHub login",
-    "  --emails                 Comma-separated or repeatable email aliases",
-    "",
-    "Repository filters:",
-    "  --include-org            Restrict to org owners",
-    "  --exclude-org            Exclude org owners",
-    "  --include-repo           Restrict to owner/name repositories",
-    "  --exclude-repo           Exclude owner/name repositories",
-    "  --owned-only             Keep only repositories owned by the authenticated user",
-    "",
-    "Branch scanning:",
-    "  --scan-feature-branches  Scan non-default branches too",
-    "  --branch-pattern         Branch matcher using glob:, prefix:, or regex:",
-    "",
-    "Enrichment:",
-    "  --include-diff-stats     Fetch additions, deletions, and files changed",
-    "  --detect-wip             Mark commits not seen on the default branch as WIP",
-    "  --classify-messages      Categorize commit messages",
-    "",
-    "Execution:",
-    "  --dry-run                Discover repositories without scanning commits",
-    "  --html                   Also generate the HTML dashboard alongside the JSON output",
-    "  --verbose                Print verbose progress to stderr",
-    "  --help                   Show this help text",
-  ].join("\n");
-}
+  ];
 
-function splitInlineValue(token: string): [string, string | undefined] {
-  const separatorIndex = token.indexOf("=");
-  if (separatorIndex === -1) {
-    return [token, undefined];
+  for (const section of HELP_SECTION_ORDER) {
+    lines.push("", `${section}:`);
+    for (const definition of FLAG_DEFINITIONS) {
+      if (definition.helpSection === section) {
+        lines.push(`  ${definition.flag.padEnd(25)}${definition.helpText}`);
+      }
+    }
   }
 
-  return [token.slice(0, separatorIndex), token.slice(separatorIndex + 1)];
+  return lines.join("\n");
 }
 
 function defaultOutputPath(since: Date, until: Date): string {
@@ -260,37 +213,12 @@ function normalizeList(values: string[]): string[] {
 }
 
 function setBooleanFlag(options: CliOptions, flag: string): void {
-  switch (flag) {
-    case "--owned-only":
-      options.ownedOnly = true;
-      break;
-    case "--scan-feature-branches":
-      options.scanFeatureBranches = true;
-      break;
-    case "--include-diff-stats":
-      options.includeDiffStats = true;
-      break;
-    case "--detect-wip":
-      options.detectWip = true;
-      break;
-    case "--classify-messages":
-      options.classifyMessages = true;
-      break;
-    case "--verbose":
-      options.verbose = true;
-      break;
-    case "--dry-run":
-      options.dryRun = true;
-      break;
-    case "--html":
-      options.html = true;
-      break;
-    case "--help":
-      options.help = true;
-      break;
-    default:
-      throw new Error(`Unknown boolean flag "${flag}".`);
+  const definition = FLAG_BY_TOKEN.get(flag);
+  if (definition?.kind !== "boolean") {
+    throw new Error(`Unknown boolean flag "${flag}".`);
   }
+
+  options[definition.cliKey] = true;
 }
 
 function setSingleValueFlag(
@@ -298,154 +226,62 @@ function setSingleValueFlag(
   flag: string,
   value: string,
 ): void {
-  switch (flag) {
-    case "--since":
-      options.since = value;
-      break;
-    case "--until":
-      options.until = value;
-      break;
-    case "--output":
-      options.output = value;
-      break;
-    case "--author":
-      options.author = value;
-      break;
-    default:
-      throw new Error(`Unknown single-value flag "${flag}".`);
+  const definition = FLAG_BY_TOKEN.get(flag);
+  if (definition?.kind !== "single") {
+    throw new Error(`Unknown single-value flag "${flag}".`);
   }
+
+  options[definition.cliKey] = value;
 }
 
 function setListValueFlag(options: CliOptions, flag: string, value: string): void {
-  switch (flag) {
-    case "--emails":
-      options.emails.push(value);
-      break;
-    case "--include-org":
-      options.includeOrgs.push(value);
-      break;
-    case "--exclude-org":
-      options.excludeOrgs.push(value);
-      break;
-    case "--include-repo":
-      options.includeRepos.push(value);
-      break;
-    case "--exclude-repo":
-      options.excludeRepos.push(value);
-      break;
-    case "--branch-pattern":
-      options.branchPatterns.push(value);
-      break;
-    default:
-      throw new Error(`Unknown list flag "${flag}".`);
+  const definition = FLAG_BY_TOKEN.get(flag);
+  if (definition?.kind !== "list") {
+    throw new Error(`Unknown list flag "${flag}".`);
   }
+
+  options[definition.cliKey].push(value);
 }
 
 function validateLocalConfigFile(
   value: Record<string, unknown>,
   fileName: string,
 ): LocalConfigFile {
-  const allowedKeys = new Set([
-    "author",
-    "emails",
-    "includeOrgs",
-    "excludeOrgs",
-    "includeRepos",
-    "excludeRepos",
-    "branchPatterns",
-    "ownedOnly",
-    "scanFeatureBranches",
-    "includeDiffStats",
-    "detectWip",
-    "classifyMessages",
-    "verbose",
-  ]);
-
   for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) {
+    if (!LOCAL_CONFIG_ALLOWED_KEYS.has(key)) {
       throw new Error(`Unsupported key "${key}" in ${fileName}.`);
     }
   }
 
-  const author = optionalString(value.author, "author", fileName);
+  const result: Partial<Record<keyof LocalConfigFile, string | string[] | boolean>> = {};
 
-  return {
-    author,
-    emails: optionalStringArray(value.emails, "emails", fileName),
-    includeOrgs: optionalStringArray(value.includeOrgs, "includeOrgs", fileName),
-    excludeOrgs: optionalStringArray(value.excludeOrgs, "excludeOrgs", fileName),
-    includeRepos: optionalStringArray(value.includeRepos, "includeRepos", fileName),
-    excludeRepos: optionalStringArray(value.excludeRepos, "excludeRepos", fileName),
-    branchPatterns: optionalStringArray(
-      value.branchPatterns,
-      "branchPatterns",
-      fileName,
-    ),
-    ownedOnly: optionalBoolean(value.ownedOnly, "ownedOnly", fileName),
-    scanFeatureBranches: optionalBoolean(
-      value.scanFeatureBranches,
-      "scanFeatureBranches",
-      fileName,
-    ),
-    includeDiffStats: optionalBoolean(
-      value.includeDiffStats,
-      "includeDiffStats",
-      fileName,
-    ),
-    detectWip: optionalBoolean(value.detectWip, "detectWip", fileName),
-    classifyMessages: optionalBoolean(
-      value.classifyMessages,
-      "classifyMessages",
-      fileName,
-    ),
-    verbose: optionalBoolean(value.verbose, "verbose", fileName),
-  };
+  for (const definition of FLAG_DEFINITIONS) {
+    if (!definition.localConfigKey) {
+      continue;
+    }
+
+    const raw = value[definition.localConfigKey];
+    if (definition.kind === "boolean") {
+      result[definition.localConfigKey] = optionalBoolean(
+        raw,
+        definition.localConfigKey,
+        fileName,
+      );
+    } else if (definition.kind === "list") {
+      result[definition.localConfigKey] = optionalStringArray(
+        raw,
+        definition.localConfigKey,
+        fileName,
+      );
+    } else {
+      result[definition.localConfigKey] = optionalString(
+        raw,
+        definition.localConfigKey,
+        fileName,
+      );
+    }
+  }
+
+  return result as LocalConfigFile;
 }
 
-function optionalString(
-  value: unknown,
-  key: string,
-  fileName: string,
-): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "string") {
-    throw new Error(`Expected "${key}" in ${fileName} to be a string.`);
-  }
-
-  return value;
-}
-
-function optionalStringArray(
-  value: unknown,
-  key: string,
-  fileName: string,
-): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-    throw new Error(`Expected "${key}" in ${fileName} to be an array of strings.`);
-  }
-
-  return value;
-}
-
-function optionalBoolean(
-  value: unknown,
-  key: string,
-  fileName: string,
-): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "boolean") {
-    throw new Error(`Expected "${key}" in ${fileName} to be a boolean.`);
-  }
-
-  return value;
-}

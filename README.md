@@ -443,6 +443,7 @@ Project entry points:
 - GitHub transport: [src/github/client.ts](src/github/client.ts)
 - HTML visualizer entry: [src/visualize.ts](src/visualize.ts)
 - HTML renderer: [src/visualizer/render.ts](src/visualizer/render.ts)
+- Dashboard client-side script (typed source): [src/visualizer/browser-client.ts](src/visualizer/browser-client.ts) — compiled via `npm run generate:browser-client`; the compiled `browser-client.js` is committed and inlined into the generated HTML by `src/visualizer/browser-script.ts`
 
 Test coverage:
 

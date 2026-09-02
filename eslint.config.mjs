@@ -4,7 +4,13 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "tmp/**", "coverage/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "tmp/**",
+      "coverage/**",
+      "src/visualizer/browser-client.js",
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -30,6 +36,14 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
+  {
+    files: ["src/visualizer/browser-client.ts"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
     },
   },
 );

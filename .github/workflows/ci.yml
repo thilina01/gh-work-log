@@ -23,6 +23,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify generated browser client is up to date
+        run: |
+          npm run generate:browser-client
+          git diff --exit-code -- src/visualizer/browser-client.js
+
       - name: Typecheck
         run: npm run typecheck
 

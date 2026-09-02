@@ -9,8 +9,10 @@ import {
   RunResult,
   SkippedRepository,
   Statistics,
+  TimeSeriesSummary,
 } from "./types";
 import { classifyMessage } from "./classification";
+import { groupBy, repositoryShaKey } from "./utils/collections";
 import { dayKey, monthKey, roundDurationSeconds, weekStartIso } from "./utils/dates";
 
 export function buildRunResult(params: {
@@ -75,17 +77,9 @@ export function buildCommitRecords(
   repositoryMap: Map<string, RepositoryRecord>,
   config: NormalizedConfig,
 ): CommitRecord[] {
-  const grouped = new Map<string, CommitObservation[]>();
-
-  for (const observation of observations) {
-    const key = `${observation.repository}:${observation.sha}`;
-    const bucket = grouped.get(key);
-    if (bucket) {
-      bucket.push(observation);
-    } else {
-      grouped.set(key, [observation]);
-    }
-  }
+  const grouped = groupBy(observations, (observation) =>
+    repositoryShaKey(observation.repository, observation.sha),
+  );
 
   const commits = Array.from(grouped.values()).map((group) => {
     const sortedObservations = [...group].sort(compareObservations);
@@ -241,16 +235,7 @@ function buildPerRepositorySummary(
   repositoryMap: Map<string, RepositoryRecord>,
   featureBranchScanEnabled: boolean,
 ): RepositorySummary[] {
-  const grouped = new Map<string, CommitRecord[]>();
-
-  for (const commit of commits) {
-    const bucket = grouped.get(commit.repository);
-    if (bucket) {
-      bucket.push(commit);
-    } else {
-      grouped.set(commit.repository, [commit]);
-    }
-  }
+  const grouped = groupBy(commits, (commit) => commit.repository);
 
   return Array.from(grouped.entries())
     .map(([repository, repositoryCommits]) => {
@@ -275,7 +260,7 @@ function buildPerRepositorySummary(
     .sort((left, right) => left.repository.localeCompare(right.repository));
 }
 
-function buildTimeSeries(commits: CommitRecord[]) {
+function buildTimeSeries(commits: CommitRecord[]): TimeSeriesSummary {
   const byDay = countBy(commits, (commit) => dayKey(commit.authoredDateTime)).map(
     ([date, commitCount]) => ({
       date,
