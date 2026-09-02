@@ -106,6 +106,13 @@ node dist/cli.js \
   --output ./tmp/report.json
 ```
 
+`--output` is optional. When omitted, the JSON path defaults to `tmp/report-<since>-<until>.json` (dates formatted as `YYYYMMDD`, `until` shown as the last included day):
+
+```bash
+node dist/cli.js --since 2026-08-01 --until 2026-08-31
+# writes tmp/report-20260801-20260831.json
+```
+
 Feature-branch scan example:
 
 ```bash
@@ -131,6 +138,18 @@ node dist/cli.js \
   --classify-messages
 ```
 
+One-shot JSON + HTML example:
+
+```bash
+node dist/cli.js \
+  --since 2026-08-01 \
+  --until 2026-08-31 \
+  --output ./tmp/report-2608.json \
+  --html
+```
+
+`--html` renders the dashboard immediately after the scan finishes, writing it next to the JSON output with the same base name (`./tmp/report-2608.html` in the example above). This replaces running `node dist/cli.js` followed by `npm run visualize`.
+
 Filter examples:
 
 ```bash
@@ -155,7 +174,10 @@ Required flags:
 
 - `--since`: inclusive authored-date lower bound
 - `--until`: exclusive authored-date upper bound
-- `--output`: JSON output path
+
+Output:
+
+- `--output`: JSON output path; defaults to `tmp/report-<since>-<until>.json` when omitted
 
 Identity:
 
@@ -189,6 +211,7 @@ Optional enrichments and execution flags:
 - `--detect-wip`
 - `--classify-messages`
 - `--dry-run`
+- `--html`: also render the HTML dashboard right after the JSON is written, using the same base name as `--output`
 - `--verbose`
 - `--help`
 
@@ -360,7 +383,9 @@ Deterministic ordering:
 
 ## HTML Dashboard
 
-Generate a standalone HTML report from a JSON export:
+Pass `--html` to `dist/cli.js` to generate the JSON export and the HTML dashboard in a single command (see the one-shot example above).
+
+The dashboard can also be regenerated from an existing JSON export without rerunning the scan:
 
 ```bash
 npm run visualize -- --input ./tmp/report.json --output ./tmp/report.html

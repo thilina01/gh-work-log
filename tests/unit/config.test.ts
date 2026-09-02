@@ -110,6 +110,46 @@ describe("config parsing", () => {
     expect(config.scanFeatureBranches).toBe(true);
   });
 
+  it("derives a default output path from the date range when --output is omitted", () => {
+    const config = normalizeConfig(
+      parseCliArgs(["--since", "2026-08-01", "--until", "2026-08-31"]),
+    );
+
+    expect(config.outputPath.endsWith(
+      path.join("tmp", "report-20260801-20260831.json"),
+    )).toBe(true);
+  });
+
+  it("still honors an explicit --output path", () => {
+    const config = normalizeConfig(
+      parseCliArgs([
+        "--since",
+        "2026-08-01",
+        "--until",
+        "2026-08-31",
+        "--output",
+        "./custom.json",
+      ]),
+    );
+
+    expect(config.outputPath.endsWith("custom.json")).toBe(true);
+  });
+
+  it("supports the --html flag", () => {
+    const options = parseCliArgs([
+      "--since",
+      "2026-03-01",
+      "--until",
+      "2026-04-01",
+      "--output",
+      "./report.json",
+      "--html",
+    ]);
+
+    expect(options.html).toBe(true);
+    expect(mergeCliOptions(options, {}).html).toBe(true);
+  });
+
   it("rejects unsupported local config keys", () => {
     const fixtureDir = mkdtempSync(path.join(tmpdir(), "gh-work-log-config-"));
     writeFileSync(

@@ -5,6 +5,7 @@ import { assertSinceBeforeUntil, parseSince, parseUntil } from "./utils/dates";
 import { compileBranchPatterns } from "./utils/patterns";
 
 export const DEFAULT_LOCAL_CONFIG_FILE = ".gh-work-log.local.json";
+export const DEFAULT_OUTPUT_DIR = "tmp";
 
 const BOOLEAN_FLAGS = new Set([
   "--owned-only",
@@ -14,6 +15,7 @@ const BOOLEAN_FLAGS = new Set([
   "--classify-messages",
   "--verbose",
   "--dry-run",
+  "--html",
   "--help",
 ]);
 
@@ -42,6 +44,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     classifyMessages: false,
     verbose: false,
     dryRun: false,
+    html: false,
     help: false,
   };
 
@@ -139,6 +142,7 @@ export function mergeCliOptions(
       Boolean(localConfig.classifyMessages) || cliOptions.classifyMessages,
     verbose: Boolean(localConfig.verbose) || cliOptions.verbose,
     dryRun: cliOptions.dryRun,
+    html: cliOptions.html,
     help: cliOptions.help,
   };
 }
@@ -148,8 +152,8 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     throw new Error("");
   }
 
-  if (!options.since || !options.until || !options.output) {
-    throw new Error("`--since`, `--until`, and `--output` are required.");
+  if (!options.since || !options.until) {
+    throw new Error("`--since` and `--until` are required.");
   }
 
   const since = parseSince(options.since);
@@ -161,7 +165,7 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     until,
     sinceIso: since.toISOString(),
     untilIso: until.toISOString(),
-    outputPath: path.resolve(options.output),
+    outputPath: path.resolve(options.output ?? defaultOutputPath(since, until)),
     requestedAuthor: options.author?.trim() || undefined,
     emails: normalizeList(options.emails),
     includeOrgs: normalizeList(options.includeOrgs),
@@ -186,13 +190,15 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
 
 export function renderHelp(): string {
   return [
-    "Usage: gh-work-log --since <iso|date> --until <iso|date> --output <file> [options]",
+    "Usage: gh-work-log --since <iso|date> --until <iso|date> [--output <file>] [options]",
     `Optional local defaults: ${DEFAULT_LOCAL_CONFIG_FILE}`,
     "",
     "Required:",
     "  --since                  Inclusive authored-date lower bound",
     "  --until                  Exclusive authored-date upper bound",
-    "  --output                 Output JSON path",
+    "",
+    "Output:",
+    `  --output                 Output JSON path (default: ${DEFAULT_OUTPUT_DIR}/report-<since>-<until>.json)`,
     "",
     "Identity:",
     "  --author                 Override target GitHub login",
@@ -216,6 +222,7 @@ export function renderHelp(): string {
     "",
     "Execution:",
     "  --dry-run                Discover repositories without scanning commits",
+    "  --html                   Also generate the HTML dashboard alongside the JSON output",
     "  --verbose                Print verbose progress to stderr",
     "  --help                   Show this help text",
   ].join("\n");
@@ -228,6 +235,17 @@ function splitInlineValue(token: string): [string, string | undefined] {
   }
 
   return [token.slice(0, separatorIndex), token.slice(separatorIndex + 1)];
+}
+
+function defaultOutputPath(since: Date, until: Date): string {
+  const sinceKey = formatUtcDateKey(since);
+  const lastIncludedDay = new Date(until.getTime() - 1);
+  const untilKey = formatUtcDateKey(lastIncludedDay);
+  return path.join(DEFAULT_OUTPUT_DIR, `report-${sinceKey}-${untilKey}.json`);
+}
+
+function formatUtcDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10).replaceAll("-", "");
 }
 
 function normalizeList(values: string[]): string[] {
@@ -263,6 +281,9 @@ function setBooleanFlag(options: CliOptions, flag: string): void {
       break;
     case "--dry-run":
       options.dryRun = true;
+      break;
+    case "--html":
+      options.html = true;
       break;
     case "--help":
       options.help = true;

@@ -27,6 +27,7 @@ export interface CliOptions {
   classifyMessages: boolean;
   verbose: boolean;
   dryRun: boolean;
+  html: boolean;
   help: boolean;
 }
 
