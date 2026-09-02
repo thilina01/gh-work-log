@@ -81,6 +81,9 @@ class FakeGitHubClient implements GitHubClientLike {
       sourceMode: "default_branch" | "feature_branch";
       authorLogin: string | null;
       authorEmail: string | null;
+      parentCount: number;
+      mergeIncludesExternalAuthor: boolean;
+      mergeBranchAuthorLogin: string | null;
     }>;
     missingRef: boolean;
   }> {
@@ -231,6 +234,9 @@ function makeObservation(
   sha: string,
   message: string,
   authoredDateTime: string,
+  parentCount = 1,
+  mergeIncludesExternalAuthor = false,
+  mergeBranchAuthorLogin: string | null = null,
 ) {
   return {
     repository: repository.fullName,
@@ -246,6 +252,9 @@ function makeObservation(
       scanBranch === repository.defaultBranch ? "default_branch" : "feature_branch",
     authorLogin: "alice",
     authorEmail: "alice@example.com",
+    parentCount,
+    mergeIncludesExternalAuthor,
+    mergeBranchAuthorLogin,
   } as const;
 }
 

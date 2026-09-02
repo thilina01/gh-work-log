@@ -10,7 +10,10 @@ export function renderBrowserScript(dashboardData: unknown): string {
       );
       const repoFilter = document.getElementById("repo-filter");
       const branchFilter = document.getElementById("branch-filter");
+      const authorFilter = document.getElementById("author-filter");
       const wipFilter = document.getElementById("wip-filter");
+      const mergeFilter = document.getElementById("merge-filter");
+      const externalAuthorFilter = document.getElementById("external-author-filter");
       const searchInput = document.getElementById("commit-search");
       const tableBody = document.getElementById("commit-table-body");
       const resultsMeta = document.getElementById("commit-results-meta");
@@ -28,6 +31,7 @@ export function renderBrowserScript(dashboardData: unknown): string {
 
       const repositories = Array.from(new Set(rows.map((row) => row.repository))).sort();
       const branches = Array.from(new Set(rows.map((row) => row.branch))).sort();
+      const authors = Array.from(new Set(rows.map((row) => resolveAuthorLabel(row)).filter(Boolean))).sort();
 
       for (const repo of repositories) {
         const option = document.createElement("option");
@@ -43,10 +47,28 @@ export function renderBrowserScript(dashboardData: unknown): string {
         branchFilter.appendChild(option);
       }
 
+      for (const author of authors) {
+        const option = document.createElement("option");
+        option.value = author;
+        option.textContent = author;
+        authorFilter.appendChild(option);
+      }
+
+      function resolveAuthorLabel(row) {
+        if (row.isMergeCommit && row.mergeBranchAuthorLogin) {
+          return row.mergeBranchAuthorLogin;
+        }
+
+        return row.authorLogin || row.authorEmail || null;
+      }
+
       function renderRows() {
         const repoValue = repoFilter.value;
         const branchValue = branchFilter.value;
+        const authorValue = authorFilter.value;
         const wipValue = wipFilter.value;
+        const mergeValue = mergeFilter.value;
+        const externalAuthorValue = externalAuthorFilter.value;
         const query = searchInput.value.trim().toLowerCase();
 
         const filtered = rows.filter((row) => {
@@ -56,7 +78,16 @@ export function renderBrowserScript(dashboardData: unknown): string {
           if (branchValue && row.branch !== branchValue) {
             return false;
           }
+          if (authorValue && resolveAuthorLabel(row) !== authorValue) {
+            return false;
+          }
           if (wipValue && String(row.isWip) !== wipValue) {
+            return false;
+          }
+          if (mergeValue && String(row.isMergeCommit) !== mergeValue) {
+            return false;
+          }
+          if (externalAuthorValue && String(row.mergeIncludesExternalAuthor) !== externalAuthorValue) {
             return false;
           }
           if (!query) {
@@ -78,6 +109,13 @@ export function renderBrowserScript(dashboardData: unknown): string {
           const badge = row.isWip
             ? '<span class="chip" style="border-color: rgba(171,35,70,.18); color: #ab2346;">WIP</span>'
             : '<span class="chip">No</span>';
+          const mergeBadge = row.isMergeCommit
+            ? '<span class="chip" style="border-color: rgba(18,116,117,.18); color: #127475;">Merge</span>'
+            : '<span class="chip">No</span>';
+          const authorLabel = resolveAuthorLabel(row);
+          const mergeAuthorBadge = authorLabel
+            ? '<span class="chip"' + (row.mergeIncludesExternalAuthor ? ' style="border-color: rgba(214,108,6,.25); color: #d96c06;"' : '') + '>' + escapeBrowserHtml(authorLabel) + '</span>'
+            : '<span class="chip">&mdash;</span>';
 
           return '<tr>' +
             '<td data-column="authored">' + formatBrowserHtml(new Date(row.authoredDateTime).toLocaleString()) + '</td>' +
@@ -87,6 +125,8 @@ export function renderBrowserScript(dashboardData: unknown): string {
             '<td data-column="sha"><a class="sha-link" href="' + escapeBrowserHtml(row.url) + '" target="_blank" rel="noreferrer noopener"><code>' + escapeBrowserHtml(shortSha) + '</code></a></td>' +
             '<td data-column="message">' + escapeBrowserHtml(row.message) + '</td>' +
             '<td data-column="wip">' + badge + '</td>' +
+            '<td data-column="merge">' + mergeBadge + '</td>' +
+            '<td data-column="mergeAuthor">' + mergeAuthorBadge + '</td>' +
           '</tr>';
         }).join("");
 
@@ -99,7 +139,7 @@ export function renderBrowserScript(dashboardData: unknown): string {
         countChip.textContent = filteredCount.toLocaleString() + ' rows';
 
         if (filtered.length === 0) {
-          tableBody.innerHTML = '<tr><td colspan="7"><div class="empty">No commits match the current filters.</div></td></tr>';
+          tableBody.innerHTML = '<tr><td colspan="9"><div class="empty">No commits match the current filters.</div></td></tr>';
         }
 
         applyColumnVisibility();
@@ -192,7 +232,10 @@ export function renderBrowserScript(dashboardData: unknown): string {
 
       repoFilter.addEventListener("change", renderRows);
       branchFilter.addEventListener("change", renderRows);
+      authorFilter.addEventListener("change", renderRows);
       wipFilter.addEventListener("change", renderRows);
+      mergeFilter.addEventListener("change", renderRows);
+      externalAuthorFilter.addEventListener("change", renderRows);
       searchInput.addEventListener("input", renderRows);
 
       for (const button of tabButtons) {

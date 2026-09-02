@@ -127,6 +127,9 @@ export interface CommitObservation {
   sourceMode: SourceMode;
   authorLogin: string | null;
   authorEmail: string | null;
+  parentCount: number;
+  mergeIncludesExternalAuthor: boolean;
+  mergeBranchAuthorLogin: string | null;
   additions?: number;
   deletions?: number;
   filesChanged?: number;
@@ -149,8 +152,13 @@ export interface CommitRecord {
   committedDateTime: string | null;
   url: string;
   sourceMode: SourceMode;
+  authorLogin: string | null;
+  authorEmail: string | null;
   isWip: boolean;
   wipReason?: string;
+  isMergeCommit: boolean;
+  mergeIncludesExternalAuthor: boolean;
+  mergeBranchAuthorLogin: string | null;
   additions?: number;
   deletions?: number;
   filesChanged?: number;
@@ -165,6 +173,8 @@ export interface RepositorySummary {
   firstCommitAt: string;
   lastCommitAt: string;
   wipCommitCount: number;
+  mergeCommitCount: number;
+  externalAuthorMergeCount: number;
 }
 
 export interface StatisticsSummary {

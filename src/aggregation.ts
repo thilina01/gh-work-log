@@ -116,10 +116,15 @@ export function buildCommitRecords(
       committedDateTime: first.committedDateTime,
       url: first.url,
       sourceMode: observedOnDefault ? "default_branch" : "feature_branch",
+      authorLogin: first.authorLogin,
+      authorEmail: first.authorEmail,
       isWip:
         config.detectWip &&
         canonicalBranch !== repository.defaultBranch &&
         !observedOnDefault,
+      isMergeCommit: first.parentCount > 1,
+      mergeIncludesExternalAuthor: first.mergeIncludesExternalAuthor,
+      mergeBranchAuthorLogin: first.mergeBranchAuthorLogin,
     };
 
     if (config.scanFeatureBranches) {
@@ -261,6 +266,10 @@ function buildPerRepositorySummary(
         firstCommitAt: sorted[0]!.authoredDateTime,
         lastCommitAt: sorted[sorted.length - 1]!.authoredDateTime,
         wipCommitCount: sorted.filter((commit) => commit.isWip).length,
+        mergeCommitCount: sorted.filter((commit) => commit.isMergeCommit).length,
+        externalAuthorMergeCount: sorted.filter(
+          (commit) => commit.mergeIncludesExternalAuthor,
+        ).length,
       };
     })
     .sort((left, right) => left.repository.localeCompare(right.repository));

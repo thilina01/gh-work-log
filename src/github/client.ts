@@ -33,6 +33,15 @@ interface GraphqlCommitResponse {
               email: string | null;
               user: { login: string | null } | null;
             } | null;
+            parents: {
+              totalCount: number;
+              nodes: Array<{
+                author: {
+                  email: string | null;
+                  user: { login: string | null } | null;
+                } | null;
+              }>;
+            };
           }>;
           pageInfo: {
             hasNextPage: boolean;
@@ -244,7 +253,12 @@ export class GitHubClient {
     let missingRef = false;
 
     for (const author of queries) {
-      const batch = await this.fetchCommitHistory(params.repository, params.branch, author);
+      const batch = await this.fetchCommitHistory(
+        params.repository,
+        params.branch,
+        author,
+        params.target,
+      );
       missingRef = missingRef || batch.missingRef;
 
       for (const observation of batch.observations) {
@@ -288,6 +302,7 @@ export class GitHubClient {
     repository: RepositoryRecord,
     branch: string,
     author: { id?: string; emails?: string[] },
+    target: TargetIdentity,
   ): Promise<{ observations: CommitObservation[]; missingRef: boolean }> {
     const observations: CommitObservation[] = [];
     let after: string | null = null;
@@ -329,6 +344,9 @@ export class GitHubClient {
           sourceMode: branch === repository.defaultBranch ? "default_branch" : "feature_branch",
           authorLogin: node.author?.user?.login ?? null,
           authorEmail: node.author?.email ?? null,
+          parentCount: node.parents.totalCount,
+          mergeIncludesExternalAuthor: detectExternalMergeAuthor(node.parents, target),
+          mergeBranchAuthorLogin: resolveMergeBranchAuthorLogin(node.parents),
         });
       }
 
@@ -485,6 +503,17 @@ function buildCommitHistoryQuery(): string {
                       login
                     }
                   }
+                  parents(first: 2) {
+                    totalCount
+                    nodes {
+                      author {
+                        email
+                        user {
+                          login
+                        }
+                      }
+                    }
+                  }
                 }
                 pageInfo {
                   hasNextPage
@@ -497,6 +526,56 @@ function buildCommitHistoryQuery(): string {
       }
     }
   `;
+}
+
+type MergeParents = {
+  totalCount: number;
+  nodes: Array<{
+    author: { email: string | null; user: { login: string | null } | null } | null;
+  }>;
+};
+
+export function detectExternalMergeAuthor(parents: MergeParents, target: TargetIdentity): boolean {
+  const author = getMergedBranchAuthor(parents);
+  if (!author) {
+    return false;
+  }
+
+  return !isTargetAuthor(author, target);
+}
+
+export function resolveMergeBranchAuthorLogin(parents: MergeParents): string | null {
+  const author = getMergedBranchAuthor(parents);
+  if (!author) {
+    return null;
+  }
+
+  return author.user?.login ?? author.email ?? null;
+}
+
+function getMergedBranchAuthor(
+  parents: MergeParents,
+): { email: string | null; user: { login: string | null } | null } | null {
+  if (parents.totalCount <= 1) {
+    return null;
+  }
+
+  return parents.nodes[1]?.author ?? null;
+}
+
+function isTargetAuthor(
+  author: { email: string | null; user: { login: string | null } | null } | null,
+  target: TargetIdentity,
+): boolean {
+  if (!author) {
+    return false;
+  }
+
+  if (author.user?.login && author.user.login === target.login) {
+    return true;
+  }
+
+  return Boolean(author.email && target.emails.includes(author.email));
 }
 
 function mapRepository(value: unknown): RepositoryRecord {

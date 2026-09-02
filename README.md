@@ -305,6 +305,19 @@ WIP detection:
 - WIP is heuristic
 - When enabled, a commit is marked WIP when its canonical branch is non-default and it was not observed on the default branch
 
+Merge commit detection:
+
+- Every commit's parent count is fetched from GitHub, and a commit is marked as a merge commit when it has more than one parent
+- This is a structural check, not a message-text heuristic, so it always runs regardless of `--classify-messages`
+- Squash-merged and rebase-merged pull requests are not flagged, since those land as ordinary single-parent commits
+
+External-author merge detection:
+
+- For each merge commit, the login (falling back to email) of its second parent's author (the tip of the branch that was merged in) is recorded as `mergeBranchAuthorLogin`
+- That author is also compared against the target identity's login and email aliases; a mismatch sets `mergeIncludesExternalAuthor`, flagging the merge as bringing in work from another author, e.g. the target merged a pull request authored by someone else
+- This only inspects the immediate branch-tip commit, not every commit folded into the merge, so a branch with mixed authorship may not be fully reflected
+- This check runs unconditionally alongside merge commit detection, at no extra API cost
+
 ## GitHub API Usage
 
 The tool uses `gh api` subprocesses for all GitHub access.
@@ -320,6 +333,7 @@ REST endpoints:
 GraphQL:
 
 - `repository.ref(qualifiedName: ...).target.history(first: 100, after: $after, since: $since, until: $until, author: $author)`
+- Each history node includes `parents(first: 2) { totalCount nodes { author { email user { login } } } }`, used to detect merge commits and whether the merged-in branch was authored by someone else
 
 The GraphQL history query is run once for the target GitHub user id and once more for configured email aliases when email matching is enabled. Results are unioned client-side and then range-filtered again by authored date to preserve the inclusive/exclusive contract.
 
@@ -372,6 +386,8 @@ Commit records include:
 - URL
 - source mode
 - WIP flag and optional WIP reason
+- merge commit flag
+- external-author merge flag and the merged branch's author login (or email)
 - optional diff stats
 - optional message category
 
@@ -402,7 +418,10 @@ The generated dashboard currently includes:
 The `All Commits` tab supports:
 
 - full-width table rendering
-- repository, canonical branch, WIP, and free-text filters
+- repository, canonical branch, author, WIP, merge commit, external-author merge, and free-text filters
+- the merge commit filter can show all commits, merge commits only, or exclude merge commits entirely
+- the external-author filter isolates merges of your own work from merges that bring in another author's branch, or excludes the latter entirely
+- the `Author` column and filter show the commit's own author for regular commits, or the merged branch's tip commit author for merge commits, highlighted when it differs from the target author
 - free-text search includes repository, canonical branch, scan branch, SHA, and message text
 - show/hide column controls
 - sorting on `Authored` and `Repository`

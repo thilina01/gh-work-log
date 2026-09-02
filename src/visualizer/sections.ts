@@ -6,6 +6,8 @@ import {
   formatNumber,
   humanize,
   titleCase,
+  totalExternalAuthorMergeCount,
+  totalMergeCommitCount,
   totalWipCount,
 } from "./helpers";
 
@@ -56,6 +58,8 @@ export function renderMetricCards(report: RunResult): string {
         ${metricCard("Skipped Repositories", summary.skippedRepositories, "Filtered, empty, or otherwise skipped")}
         ${metricCard("Failures", summary.failedRepositories, "Repositories that could not be processed")}
         ${metricCard("WIP Commits", totalWipCount(report), report.metadata.detectWip ? "Heuristic WIP detection enabled" : "WIP detection disabled in this run")}
+        ${metricCard("Merge Commits", totalMergeCommitCount(report), "Commits with more than one parent, typically produced by merging a pull request")}
+        ${metricCard("External-Author Merges", totalExternalAuthorMergeCount(report), "Merge commits whose incoming branch tip was authored by someone other than the target author")}
       </section>`;
 }
 
@@ -214,10 +218,23 @@ export function renderCommitsTab(report: RunResult): string {
             <select id="branch-filter">
               <option value="">All branches</option>
             </select>
+            <select id="author-filter">
+              <option value="">All authors</option>
+            </select>
             <select id="wip-filter">
               <option value="">All WIP states</option>
               <option value="true">WIP only</option>
               <option value="false">Non-WIP only</option>
+            </select>
+            <select id="merge-filter">
+              <option value="">All commits</option>
+              <option value="true">Merge commits only</option>
+              <option value="false">Exclude merge commits</option>
+            </select>
+            <select id="external-author-filter">
+              <option value="">All commits</option>
+              <option value="true">External-author merges only</option>
+              <option value="false">Exclude external-author merges</option>
             </select>
           </div>
           <div class="column-controls" id="column-controls">
@@ -228,6 +245,8 @@ export function renderCommitsTab(report: RunResult): string {
             ${renderColumnToggle("sha", "SHA")}
             ${renderColumnToggle("message", "Message")}
             ${renderColumnToggle("wip", "WIP")}
+            ${renderColumnToggle("merge", "Merge")}
+            ${renderColumnToggle("mergeAuthor", "Author")}
           </div>
           <div class="results-meta" id="commit-results-meta"></div>
           <div class="table-wrap table-wrap--commits">
@@ -245,6 +264,8 @@ export function renderCommitsTab(report: RunResult): string {
                   <th data-column="sha">SHA</th>
                   <th data-column="message">Message</th>
                   <th data-column="wip">WIP</th>
+                  <th data-column="merge">Merge</th>
+                  <th data-column="mergeAuthor">Author</th>
                 </tr>
               </thead>
               <tbody id="commit-table-body"></tbody>

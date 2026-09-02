@@ -50,6 +50,8 @@ describe("renderHtmlReport", () => {
             firstCommitAt: "2026-03-02T10:00:00.000Z",
             lastCommitAt: "2026-03-20T10:00:00.000Z",
             wipCommitCount: 0,
+            mergeCommitCount: 0,
+            externalAuthorMergeCount: 0,
           },
         ],
         timeSeries: {
@@ -82,7 +84,12 @@ describe("renderHtmlReport", () => {
           committedDateTime: "2026-03-20T10:01:00.000Z",
           url: "https://github.com/org/app/commit/abc123456",
           sourceMode: "default_branch",
+          authorLogin: "thilina01",
+          authorEmail: "thilina@example.com",
           isWip: false,
+          isMergeCommit: false,
+          mergeIncludesExternalAuthor: false,
+          mergeBranchAuthorLogin: null,
         },
       ],
     };

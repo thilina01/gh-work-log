@@ -4,6 +4,17 @@ export function totalWipCount(report: RunResult): number {
   return report.statistics.perRepository.reduce((sum, repo) => sum + repo.wipCommitCount, 0);
 }
 
+export function totalMergeCommitCount(report: RunResult): number {
+  return report.statistics.perRepository.reduce((sum, repo) => sum + repo.mergeCommitCount, 0);
+}
+
+export function totalExternalAuthorMergeCount(report: RunResult): number {
+  return report.statistics.perRepository.reduce(
+    (sum, repo) => sum + repo.externalAuthorMergeCount,
+    0,
+  );
+}
+
 export function formatDate(value: string): string {
   return new Date(value).toLocaleString("en-US", {
     dateStyle: "medium",

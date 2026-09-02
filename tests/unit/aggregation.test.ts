@@ -58,6 +58,9 @@ describe("aggregation", () => {
           sourceMode: "default_branch",
           authorLogin: "alice",
           authorEmail: "alice@example.com",
+          parentCount: 1,
+          mergeIncludesExternalAuthor: false,
+          mergeBranchAuthorLogin: null,
           additions: 10,
           deletions: 2,
           filesChanged: 1,
@@ -75,6 +78,9 @@ describe("aggregation", () => {
           sourceMode: "feature_branch",
           authorLogin: "alice",
           authorEmail: "alice@example.com",
+          parentCount: 1,
+          mergeIncludesExternalAuthor: false,
+          mergeBranchAuthorLogin: null,
         },
         {
           repository: repository.fullName,
@@ -89,6 +95,9 @@ describe("aggregation", () => {
           sourceMode: "feature_branch",
           authorLogin: "alice",
           authorEmail: "alice@example.com",
+          parentCount: 2,
+          mergeIncludesExternalAuthor: true,
+          mergeBranchAuthorLogin: "bob",
           additions: 1,
           deletions: 3,
           filesChanged: 2,
@@ -103,6 +112,7 @@ describe("aggregation", () => {
       branch: "main",
       observedBranches: ["feature/work", "main"],
       isWip: false,
+      isMergeCommit: false,
       messageCategory: "feat",
       additions: 10,
     });
@@ -110,6 +120,9 @@ describe("aggregation", () => {
       branch: "feature/work",
       isWip: true,
       wipReason: "not_in_default_branch",
+      isMergeCommit: true,
+      mergeIncludesExternalAuthor: true,
+      mergeBranchAuthorLogin: "bob",
       messageCategory: "fix",
     });
   });
@@ -149,6 +162,26 @@ describe("aggregation", () => {
           sourceMode: "default_branch",
           authorLogin: "alice",
           authorEmail: "alice@example.com",
+          parentCount: 1,
+          mergeIncludesExternalAuthor: false,
+          mergeBranchAuthorLogin: null,
+        },
+        {
+          repository: repository.fullName,
+          defaultBranch: "main",
+          scanBranch: "main",
+          sha: "merge1",
+          message: "Merge pull request #4 from org/service-branch",
+          messageHeadline: "Merge pull request #4 from org/service-branch",
+          authoredDateTime: "2026-03-02T11:00:00.000Z",
+          committedDateTime: "2026-03-02T11:00:00.000Z",
+          url: "https://github.com/org/service/commit/merge1",
+          sourceMode: "default_branch",
+          authorLogin: "alice",
+          authorEmail: "alice@example.com",
+          parentCount: 2,
+          mergeIncludesExternalAuthor: true,
+          mergeBranchAuthorLogin: "bob",
         },
       ],
       repositoryMap: new Map([[repository.fullName, repository]]),
@@ -161,13 +194,22 @@ describe("aggregation", () => {
     expect(result.statistics.summary).toMatchObject({
       repositoriesScanned: 1,
       repositoriesWithCommits: 1,
-      totalCommitsCollected: 1,
-      uniqueCommits: 1,
+      totalCommitsCollected: 2,
+      uniqueCommits: 2,
       skippedRepositories: 1,
       durationSeconds: 2.5,
     });
+    expect(result.statistics.perRepository).toEqual([
+      expect.objectContaining({
+        repository: "org/service",
+        commitCount: 2,
+        wipCommitCount: 0,
+        mergeCommitCount: 1,
+        externalAuthorMergeCount: 1,
+      }),
+    ]);
     expect(result.statistics.timeSeries.byWeek).toEqual([
-      { weekStart: "2026-03-02T00:00:00.000Z", commitCount: 1 },
+      { weekStart: "2026-03-02T00:00:00.000Z", commitCount: 2 },
     ]);
     expect(result.statistics.messageCategories).toEqual({
       feat: 0,
@@ -176,7 +218,7 @@ describe("aggregation", () => {
       docs: 1,
       test: 0,
       chore: 0,
-      other: 0,
+      other: 1,
     });
   });
 });
