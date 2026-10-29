@@ -28,6 +28,7 @@ export function renderHero(report: RunResult): string {
             <div class="meta-pill"><strong>Authenticated User</strong><br />${escapeHtml(report.metadata.authenticatedUser)}</div>
             <div class="meta-pill"><strong>Scan Mode</strong><br />${humanize(report.metadata.scanMode)}</div>
             <div class="meta-pill"><strong>Feature Branches</strong><br />${report.metadata.featureBranchScanEnabled ? "Enabled" : "Disabled"}</div>
+            ${report.metadata.profile !== "operator" ? `<div class="meta-pill"><strong>Report Profile</strong><br />${escapeHtml(titleCase(report.metadata.profile))}</div>` : ""}
           </div>
         </div>
         <aside class="panel hero-side">
@@ -76,6 +77,8 @@ export function renderTabStrip(): string {
 export function renderOverviewTab(report: RunResult): string {
   const summary = report.statistics.summary;
   const discovery = report.statistics.discovery;
+  const highlights = report.statistics.highlights;
+  const skippedByCategory = report.statistics.skippedByCategory;
 
   return `<section id="overview-panel" class="tab-panel is-active">
         <div class="stack stack--wide">
@@ -100,13 +103,17 @@ export function renderOverviewTab(report: RunResult): string {
                   <tr><td>Repositories with commits</td><td>${formatNumber(summary.repositoriesWithCommits)}</td></tr>
                   <tr><td>Unique commits</td><td>${formatNumber(summary.uniqueCommits)}</td></tr>
                   <tr><td>Skipped repositories</td><td>${formatNumber(summary.skippedRepositories)}</td></tr>
+                  <tr><td>Filter skips</td><td>${formatNumber(skippedByCategory.filter)}</td></tr>
+                  <tr><td>Operational skips</td><td>${formatNumber(skippedByCategory.operational)}</td></tr>
                   <tr><td>Failures</td><td>${formatNumber(summary.failedRepositories)}</td></tr>
+                  <tr><td>WIP share</td><td>${formatWipShare(highlights.wipShare)}</td></tr>
                   <tr><td>Most active day</td><td>${escapeHtml(report.statistics.timeSeries.mostActiveDay?.date ?? "No data")}</td></tr>
                   <tr><td>Most active repository</td><td>${escapeHtml(report.statistics.timeSeries.mostActiveRepository?.repository ?? "No data")}</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
+          ${renderHighlightsPanel(report)}
         </div>
       </section>`;
 }
@@ -315,13 +322,32 @@ function renderRepoBars(
 function renderIssues(report: RunResult): string {
   const failures = report.failures;
   const skipped = report.statistics.skippedRepositories;
+  const skippedByCategory = report.statistics.skippedByCategory;
+  const profile = report.metadata.profile;
+  const operationalSkips = skipped.filter((item) => item.category === "operational");
+  const filterSkips = skipped.filter((item) => item.category === "filter");
+  const hasFilterNote =
+    profile !== "operator" && skippedByCategory.filter > 0;
+  const hasContent =
+    failures.length > 0 ||
+    operationalSkips.length > 0 ||
+    filterSkips.length > 0 ||
+    hasFilterNote;
 
-  if (failures.length === 0 && skipped.length === 0) {
+  if (!hasContent) {
     return `<div class="empty" style="background: rgba(18,116,117,.08); color: #127475;">No failures or skipped repositories were recorded for this run.</div>`;
   }
 
   return `
-    ${failures.length > 0 ? `<div class="table-wrap" style="margin-bottom: 14px;">
+    ${failures.length > 0 ? renderFailureTable(failures) : ""}
+    ${operationalSkips.length > 0 ? renderSkipTable("Operational skips", operationalSkips) : ""}
+    ${profile === "operator" && filterSkips.length > 0 ? renderSkipTable("Filter skips", filterSkips) : ""}
+    ${hasFilterNote ? `<p class="section-copy" style="margin-top: 12px;">${formatNumber(skippedByCategory.filter)} repositories were excluded by include/exclude filters and omitted from this ${escapeHtml(profile)} report.</p>` : ""}
+  `;
+}
+
+function renderFailureTable(failures: RunResult["failures"]): string {
+  return `<div class="table-wrap" style="margin-bottom: 14px;">
       <table>
         <thead>
           <tr>
@@ -344,13 +370,21 @@ function renderIssues(report: RunResult): string {
             .join("")}
         </tbody>
       </table>
-    </div>` : ""}
-    ${skipped.length > 0 ? `<div class="table-wrap">
+    </div>`;
+}
+
+function renderSkipTable(
+  title: string,
+  skipped: RunResult["statistics"]["skippedRepositories"],
+): string {
+  return `<div class="table-wrap" style="margin-bottom: 14px;">
+      <h3 class="section-title" style="font-size: 1rem; margin: 0 0 10px;">${escapeHtml(title)}</h3>
       <table>
         <thead>
           <tr>
             <th>Repository</th>
             <th>Reason</th>
+            <th>Category</th>
           </tr>
         </thead>
         <tbody>
@@ -359,13 +393,87 @@ function renderIssues(report: RunResult): string {
               (item) => `<tr>
                 <td>${escapeHtml(item.repository)}</td>
                 <td>${escapeHtml(item.reason)}</td>
+                <td>${escapeHtml(item.category)}</td>
               </tr>`,
             )
             .join("")}
         </tbody>
       </table>
-    </div>` : ""}
-  `;
+    </div>`;
+}
+
+function renderHighlightsPanel(report: RunResult): string {
+  const highlights = report.statistics.highlights;
+  const categoryRows = highlights.messageCategoryMix
+    ? Object.entries(highlights.messageCategoryMix)
+        .filter(([, count]) => count > 0)
+        .map(
+          ([category, count]) =>
+            `<tr><td>${escapeHtml(category)}</td><td>${formatNumber(count)}</td></tr>`,
+        )
+        .join("")
+    : "";
+  const codeLevel = highlights.codeLevel;
+  const topRepoRows = highlights.topRepositories
+    .map(
+      (repo) =>
+        `<tr><td>${escapeHtml(repo.repository)}</td><td>${formatNumber(repo.commitCount)}</td></tr>`,
+    )
+    .join("");
+
+  return `<div class="panel section">
+            <div class="section-header">
+              <div>
+                <h2 class="section-title">Highlights</h2>
+                <p class="section-copy">Compact totals useful for management review and agent profile updates.</p>
+              </div>
+            </div>
+            <div class="table-wrap" style="margin-bottom: 14px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Top repositories</th>
+                    <th>Commits</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${topRepoRows || `<tr><td colspan="2">No repositories with commits</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+            ${categoryRows ? `<div class="table-wrap" style="margin-bottom: 14px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Message category</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${categoryRows}
+                </tbody>
+              </table>
+            </div>` : ""}
+            ${codeLevel ? `<div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code-level metric</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>Total additions</td><td>${formatNumber(codeLevel.totalAdditions)}</td></tr>
+                  <tr><td>Total deletions</td><td>${formatNumber(codeLevel.totalDeletions)}</td></tr>
+                  <tr><td>Total files changed</td><td>${formatNumber(codeLevel.totalFilesChanged)}</td></tr>
+                </tbody>
+              </table>
+            </div>` : ""}
+          </div>`;
+}
+
+function formatWipShare(wipShare: number): string {
+  return `${(wipShare * 100).toFixed(1)}%`;
 }
 
 function chartCard<T extends object>(

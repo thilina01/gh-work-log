@@ -8,7 +8,7 @@ import {
   NormalizedConfig,
   RepositoryRecord,
   RunResult,
-  SkippedRepository,
+  SkipRecord,
   TargetIdentity,
 } from "./types";
 import { mapLimit } from "./utils/async";
@@ -171,11 +171,11 @@ export function filterRepositories(
   // in the JSON/HTML output; that external field name is unchanged.
   passedFilters: RepositoryRecord[];
   scannable: RepositoryRecord[];
-  skipped: SkippedRepository[];
+  skipped: SkipRecord[];
 } {
   const passedFilters: RepositoryRecord[] = [];
   const scannable: RepositoryRecord[] = [];
-  const skipped: SkippedRepository[] = [];
+  const skipped: SkipRecord[] = [];
 
   for (const repository of repositories) {
     const includeReasons: string[] = [];
@@ -257,12 +257,12 @@ async function scanRepository(params: {
 }): Promise<{
   observations: CommitObservation[];
   failures: FailureRecord[];
-  skippedRepositories: SkippedRepository[];
+  skippedRepositories: SkipRecord[];
 }> {
   const { client, config, repository, targetIdentity, logger } = params;
   const observations: CommitObservation[] = [];
   const failures: FailureRecord[] = [];
-  const skippedRepositories: SkippedRepository[] = [];
+  const skippedRepositories: SkipRecord[] = [];
 
   logger.info(`Scanning ${repository.fullName}`);
 

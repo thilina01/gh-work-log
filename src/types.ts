@@ -1,5 +1,7 @@
 export type ScanMode = "default_branch" | "default_and_feature_branches";
 export type SourceMode = "default_branch" | "feature_branch";
+export type ReportProfile = "operator" | "management" | "agent";
+export type SkipCategory = "filter" | "operational";
 export type MessageCategory =
   | "feat"
   | "fix"
@@ -29,6 +31,7 @@ export interface CliOptions {
   dryRun: boolean;
   html: boolean;
   help: boolean;
+  profile?: string;
 }
 
 export interface LocalConfigFile {
@@ -45,6 +48,7 @@ export interface LocalConfigFile {
   detectWip?: boolean;
   classifyMessages?: boolean;
   verbose?: boolean;
+  profile?: string;
 }
 
 export interface BranchMatcher {
@@ -78,6 +82,7 @@ export interface NormalizedConfig {
   classifyMessages: boolean;
   verbose: boolean;
   dryRun: boolean;
+  profile: ReportProfile;
   concurrency: number;
   retryPolicy: RetryPolicy;
 }
@@ -100,9 +105,40 @@ export interface RepositoryRecord {
   htmlUrl: string;
 }
 
-export interface SkippedRepository {
+/** Raw skip recorded during discovery/scan before category packaging. */
+export interface SkipRecord {
   repository: string;
   reason: string;
+}
+
+export interface SkippedRepository extends SkipRecord {
+  category: SkipCategory;
+}
+
+export interface SkippedByCategory {
+  filter: number;
+  operational: number;
+}
+
+export interface ReportFilters {
+  includeOrgs: string[];
+  excludeOrgs: string[];
+  includeRepos: string[];
+  excludeRepos: string[];
+  ownedOnly: boolean;
+  branchPatterns: string[];
+}
+
+export interface ReportHighlights {
+  topRepositories: Array<{ repository: string; commitCount: number }>;
+  uniqueCommits: number;
+  repositoriesWithCommits: number;
+  wipShare: number;
+  failureCount: number;
+  operationalSkipCount: number;
+  filterSkipCount: number;
+  messageCategoryMix?: MessageCategorySummary;
+  codeLevel?: CodeLevelSummary;
 }
 
 export interface FailureRecord {
@@ -226,7 +262,9 @@ export interface DiscoverySummary {
 export interface Statistics {
   summary: StatisticsSummary;
   discovery: DiscoverySummary;
+  skippedByCategory: SkippedByCategory;
   skippedRepositories: SkippedRepository[];
+  highlights: ReportHighlights;
   perRepository: RepositorySummary[];
   timeSeries: TimeSeriesSummary;
   codeLevel?: CodeLevelSummary;
@@ -234,7 +272,7 @@ export interface Statistics {
 }
 
 export interface RunMetadata {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.1.0";
   generatedAt: string;
   authenticatedUser: string;
   targetAuthor: string;
@@ -246,6 +284,8 @@ export interface RunMetadata {
   includeDiffStats: boolean;
   classifyMessages: boolean;
   dryRun: boolean;
+  profile: ReportProfile;
+  filters: ReportFilters;
   filterField: "authoredDateTime";
   wipDetectionIsHeuristic: true;
 }

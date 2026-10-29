@@ -24,6 +24,7 @@ const ALL_CLI_OPTION_KEYS: Record<keyof CliOptions, true> = {
   verbose: true,
   dryRun: true,
   html: true,
+  profile: true,
   help: true,
 };
 

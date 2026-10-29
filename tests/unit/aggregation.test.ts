@@ -22,6 +22,7 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     classifyMessages: true,
     verbose: false,
     dryRun: false,
+    profile: "operator",
     concurrency: 5,
     retryPolicy: { maxRetries: 3, backoffMs: [1000, 2000, 4000] },
     ...overrides,
@@ -191,6 +192,16 @@ describe("aggregation", () => {
       endedAtMs: Date.parse("2026-04-05T10:00:02.500Z"),
     });
 
+    expect(result.metadata.schemaVersion).toBe("1.1.0");
+    expect(result.metadata.profile).toBe("operator");
+    expect(result.metadata.filters).toEqual({
+      includeOrgs: [],
+      excludeOrgs: [],
+      includeRepos: [],
+      excludeRepos: [],
+      ownedOnly: false,
+      branchPatterns: [],
+    });
     expect(result.statistics.summary).toMatchObject({
       repositoriesScanned: 1,
       repositoriesWithCommits: 1,
@@ -198,6 +209,26 @@ describe("aggregation", () => {
       uniqueCommits: 2,
       skippedRepositories: 1,
       durationSeconds: 2.5,
+    });
+    expect(result.statistics.skippedByCategory).toEqual({
+      filter: 1,
+      operational: 0,
+    });
+    expect(result.statistics.skippedRepositories).toEqual([
+      {
+        repository: "org/skipped",
+        reason: "excluded_repository",
+        category: "filter",
+      },
+    ]);
+    expect(result.statistics.highlights).toMatchObject({
+      uniqueCommits: 2,
+      repositoriesWithCommits: 1,
+      wipShare: 0,
+      failureCount: 0,
+      filterSkipCount: 1,
+      operationalSkipCount: 0,
+      topRepositories: [{ repository: "org/service", commitCount: 2 }],
     });
     expect(result.statistics.perRepository).toEqual([
       expect.objectContaining({
@@ -220,5 +251,78 @@ describe("aggregation", () => {
       chore: 0,
       other: 1,
     });
+  });
+
+  it("collapses filter skips for management and agent profiles", () => {
+    const repository: RepositoryRecord = {
+      fullName: "org/service",
+      ownerLogin: "org",
+      name: "service",
+      visibility: "private",
+      defaultBranch: "main",
+      isArchived: false,
+      isFork: false,
+      isDisabled: false,
+      isPrivate: true,
+      htmlUrl: "https://github.com/org/service",
+    };
+
+    const result = buildRunResult({
+      config: makeConfig({
+        profile: "management",
+        includeOrgs: ["org"],
+        classifyMessages: false,
+        includeDiffStats: false,
+      }),
+      authenticatedUser: "alice",
+      targetAuthor: "alice",
+      repositoriesDiscovered: 3,
+      repositoriesIncluded: 1,
+      scannedRepositoryCount: 1,
+      observations: [
+        {
+          repository: repository.fullName,
+          defaultBranch: "main",
+          scanBranch: "main",
+          sha: "abc",
+          message: "docs: update",
+          messageHeadline: "docs: update",
+          authoredDateTime: "2026-03-02T10:00:00.000Z",
+          committedDateTime: "2026-03-02T10:01:00.000Z",
+          url: "https://github.com/org/service/commit/abc",
+          sourceMode: "default_branch",
+          authorLogin: "alice",
+          authorEmail: "alice@example.com",
+          parentCount: 1,
+          mergeIncludesExternalAuthor: false,
+          mergeBranchAuthorLogin: null,
+        },
+      ],
+      repositoryMap: new Map([[repository.fullName, repository]]),
+      skippedRepositories: [
+        { repository: "other/personal", reason: "not_in_included_orgs" },
+        { repository: "org/empty", reason: "empty_repository" },
+      ],
+      failures: [],
+      startedAtMs: Date.parse("2026-04-05T10:00:00.000Z"),
+      endedAtMs: Date.parse("2026-04-05T10:00:01.000Z"),
+    });
+
+    expect(result.metadata.profile).toBe("management");
+    expect(result.metadata.filters.includeOrgs).toEqual(["org"]);
+    expect(result.statistics.skippedByCategory).toEqual({
+      filter: 1,
+      operational: 1,
+    });
+    expect(result.statistics.summary.skippedRepositories).toBe(2);
+    expect(result.statistics.skippedRepositories).toEqual([
+      {
+        repository: "org/empty",
+        reason: "empty_repository",
+        category: "operational",
+      },
+    ]);
+    expect(result.statistics.highlights.filterSkipCount).toBe(1);
+    expect(result.statistics.highlights.operationalSkipCount).toBe(1);
   });
 });

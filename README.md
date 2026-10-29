@@ -212,8 +212,41 @@ Optional enrichments and execution flags:
 - `--classify-messages`
 - `--dry-run`
 - `--html`: also render the HTML dashboard right after the JSON is written, using the same base name as `--output`
+- `--profile`: report packaging profile — `operator` (default), `management`, or `agent`
 - `--verbose`
 - `--help`
+
+### Report profiles
+
+Profiles reshape JSON/HTML packaging only. They do **not** change discovery, filtering, or commit scanning.
+
+| Profile | Intended use | Skip packaging |
+|---|---|---|
+| `operator` | Debugging / full fidelity | All skips listed with `category` |
+| `management` | Monthly org progress review | Filter skips collapsed to counts; operational skips kept detailed |
+| `agent` | AI/personal-profile automation | Same collapse as `management` |
+
+Recommended presets:
+
+```bash
+# Management monthly review (org filter usually comes from local config)
+node dist/cli.js \
+  --since 2026-03-01 \
+  --until 2026-04-01 \
+  --profile management \
+  --classify-messages \
+  --html \
+  --output ./tmp/report-management.json
+
+# Agent / personal-profile ingestion
+node dist/cli.js \
+  --since 2026-03-01 \
+  --until 2026-04-01 \
+  --profile agent \
+  --classify-messages \
+  --emails you@example.com \
+  --output ./tmp/report-agent.json
+```
 
 ## Local Config File
 
@@ -235,6 +268,7 @@ Supported keys:
 - `includeDiffStats`
 - `detectWip`
 - `classifyMessages`
+- `profile`
 - `verbose`
 
 Not supported in the local config file:
@@ -243,6 +277,7 @@ Not supported in the local config file:
 - `until`
 - `output`
 - `dryRun`
+- `html`
 - `help`
 
 Example:
@@ -348,22 +383,31 @@ Every report includes these top-level sections:
 
 High-level metadata includes:
 
-- schema version
+- schema version (`1.1.0`)
 - generated timestamp
 - authenticated user
 - target author
 - normalized `since` and `until`
 - scan mode and feature flags
+- report `profile`
+- applied `filters` (`includeOrgs`, `excludeOrgs`, `includeRepos`, `excludeRepos`, `ownedOnly`, `branchPatterns`)
 
 Statistics includes:
 
-- global summary
+- global summary (`skippedRepositories` is the total across categories)
 - discovery summary
-- skipped repositories
+- `skippedByCategory` (`filter` vs `operational` counts)
+- skipped repositories (detailed rows; filter rows omitted for `management` / `agent`)
+- `highlights` (top repos, WIP share, skip/failure counts, optional category mix and code-level totals)
 - per-repository summary
 - time-series summary
 - optional code-level summary when diff stats are enabled
 - optional message-category summary when classification is enabled
+
+Skip categories:
+
+- **filter:** `not_in_included_orgs`, `not_in_included_repositories`, `excluded_org`, `excluded_repository`, `owned_only_mismatch`
+- **operational:** `disabled_repository`, `missing_default_branch`, `empty_repository` (unknown reasons also count as operational)
 
 Failure records include:
 
@@ -409,10 +453,10 @@ npm run visualize -- --input ./tmp/report.json --output ./tmp/report.html
 
 The generated dashboard currently includes:
 
-- `Overview` tab for high-level run totals
+- `Overview` tab for high-level run totals, skip-category counts, and highlights (top repos, optional message categories / code-level)
 - `Activity` tab with larger full-width day, week, and month charts
 - `Repositories` tab with repository ranking and per-repository summary
-- `Issues` tab with skipped repository and failure details
+- `Issues` tab with failures, operational skips, and (for `operator`) filter skips; non-operator profiles show a filter-skip count note instead of listing out-of-scope repos
 - `All Commits` tab backed by the full commit dataset
 
 The `All Commits` tab supports:

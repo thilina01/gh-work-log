@@ -17,6 +17,8 @@ export function renderHtmlReport(report: RunResult): string {
     metadata: report.metadata,
     summary: report.statistics.summary,
     discovery: report.statistics.discovery,
+    skippedByCategory: report.statistics.skippedByCategory,
+    highlights: report.statistics.highlights,
     timeSeries: report.statistics.timeSeries,
     perRepository: report.statistics.perRepository,
     failures: report.failures,

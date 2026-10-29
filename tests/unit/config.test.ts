@@ -110,6 +110,40 @@ describe("config parsing", () => {
     expect(config.scanFeatureBranches).toBe(true);
   });
 
+  it("defaults profile to operator and accepts valid profile values", () => {
+    const defaultConfig = normalizeConfig(
+      parseCliArgs(["--since", "2026-03-01", "--until", "2026-04-01"]),
+    );
+    expect(defaultConfig.profile).toBe("operator");
+
+    const managementConfig = normalizeConfig(
+      parseCliArgs([
+        "--since",
+        "2026-03-01",
+        "--until",
+        "2026-04-01",
+        "--profile",
+        "management",
+      ]),
+    );
+    expect(managementConfig.profile).toBe("management");
+  });
+
+  it("rejects invalid profile values", () => {
+    expect(() =>
+      normalizeConfig(
+        parseCliArgs([
+          "--since",
+          "2026-03-01",
+          "--until",
+          "2026-04-01",
+          "--profile",
+          "executive",
+        ]),
+      ),
+    ).toThrow('Invalid --profile "executive"');
+  });
+
   it("derives a default output path from the date range when --output is omitted", () => {
     const config = normalizeConfig(
       parseCliArgs(["--since", "2026-08-01", "--until", "2026-08-31"]),

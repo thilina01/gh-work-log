@@ -11,12 +11,19 @@ import {
   LOCAL_CONFIG_ALLOWED_KEYS,
   SINGLE_VALUE_FLAGS,
 } from "./cli-flags";
-import { CliOptions, LocalConfigFile, NormalizedConfig } from "./types";
+import {
+  CliOptions,
+  LocalConfigFile,
+  NormalizedConfig,
+  ReportProfile,
+} from "./types";
 import { splitFlagToken } from "./utils/cli-tokens";
 import { assertSinceBeforeUntil, parseSince, parseUntil } from "./utils/dates";
 import { toErrorMessage } from "./utils/errors";
 import { compileBranchPatterns } from "./utils/patterns";
 import { optionalBoolean, optionalString, optionalStringArray } from "./utils/validation";
+
+const REPORT_PROFILES = new Set<ReportProfile>(["operator", "management", "agent"]);
 
 export { DEFAULT_LOCAL_CONFIG_FILE, DEFAULT_OUTPUT_DIR };
 
@@ -164,12 +171,28 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     classifyMessages: options.classifyMessages,
     verbose: options.verbose,
     dryRun: options.dryRun,
+    profile: parseReportProfile(options.profile),
     concurrency: 5,
     retryPolicy: {
       maxRetries: 3,
       backoffMs: [1000, 2000, 4000],
     },
   };
+}
+
+function parseReportProfile(value: string | undefined): ReportProfile {
+  if (value === undefined || value.trim() === "") {
+    return "operator";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!REPORT_PROFILES.has(normalized as ReportProfile)) {
+    throw new Error(
+      `Invalid --profile "${value}". Expected one of: operator, management, agent.`,
+    );
+  }
+
+  return normalized as ReportProfile;
 }
 
 export function renderHelp(): string {

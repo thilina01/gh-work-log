@@ -180,6 +180,14 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     helpText: "Also generate the HTML dashboard alongside the JSON output",
   },
   {
+    flag: "--profile",
+    kind: "single",
+    cliKey: "profile",
+    localConfigKey: "profile",
+    helpSection: "Execution",
+    helpText: "Report packaging profile: operator, management, or agent (default: operator)",
+  },
+  {
     flag: "--verbose",
     kind: "boolean",
     cliKey: "verbose",

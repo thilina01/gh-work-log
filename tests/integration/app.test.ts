@@ -23,6 +23,7 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     classifyMessages: true,
     verbose: false,
     dryRun: false,
+    profile: "operator",
     concurrency: 5,
     retryPolicy: { maxRetries: 3, backoffMs: [1000, 2000, 4000] },
     ...overrides,
@@ -136,9 +137,16 @@ describe("runApp", () => {
       repositoriesDiscovered: 2,
       repositoriesIncluded: 2,
     });
+    expect(result.metadata.schemaVersion).toBe("1.1.0");
+    expect(result.metadata.profile).toBe("operator");
     expect(result.statistics.skippedRepositories).toContainEqual({
       repository: "org/disabled",
       reason: "disabled_repository",
+      category: "operational",
+    });
+    expect(result.statistics.skippedByCategory).toEqual({
+      filter: 0,
+      operational: 1,
     });
     expect(writes).toHaveLength(1);
   });

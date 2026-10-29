@@ -4,14 +4,19 @@ import {
   FailureRecord,
   MessageCategorySummary,
   NormalizedConfig,
+  ReportFilters,
+  ReportHighlights,
   RepositoryRecord,
   RepositorySummary,
   RunResult,
+  SkipRecord,
+  SkippedByCategory,
   SkippedRepository,
   Statistics,
   TimeSeriesSummary,
 } from "./types";
 import { classifyMessage } from "./classification";
+import { classifySkipReason } from "./skip-taxonomy";
 import { groupBy, repositoryShaKey } from "./utils/collections";
 import { dayKey, monthKey, roundDurationSeconds, weekStartIso } from "./utils/dates";
 
@@ -24,7 +29,7 @@ export function buildRunResult(params: {
   scannedRepositoryCount: number;
   observations: CommitObservation[];
   repositoryMap: Map<string, RepositoryRecord>;
-  skippedRepositories: SkippedRepository[];
+  skippedRepositories: SkipRecord[];
   failures: FailureRecord[];
   startedAtMs: number;
   endedAtMs: number;
@@ -49,7 +54,7 @@ export function buildRunResult(params: {
 
   return {
     metadata: {
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       generatedAt: new Date(params.endedAtMs).toISOString(),
       authenticatedUser: params.authenticatedUser,
       targetAuthor: params.targetAuthor,
@@ -63,6 +68,8 @@ export function buildRunResult(params: {
       includeDiffStats: params.config.includeDiffStats,
       classifyMessages: params.config.classifyMessages,
       dryRun: params.config.dryRun,
+      profile: params.config.profile,
+      filters: buildReportFilters(params.config),
       filterField: "authoredDateTime",
       wipDetectionIsHeuristic: true,
     },
@@ -155,7 +162,7 @@ function buildStatistics(params: {
   observations: CommitObservation[];
   repositoryMap: Map<string, RepositoryRecord>;
   failures: FailureRecord[];
-  skippedRepositories: SkippedRepository[];
+  skippedRepositories: SkipRecord[];
   repositoriesDiscovered: number;
   repositoriesIncluded: number;
   scannedRepositoryCount: number;
@@ -170,29 +177,16 @@ function buildStatistics(params: {
   );
   const timeSeries = buildTimeSeries(params.commits);
 
-  const statistics: Statistics = {
-    summary: {
-      repositoriesScanned: params.scannedRepositoryCount,
-      repositoriesWithCommits: repositoriesWithCommits.size,
-      totalCommitsCollected: params.observations.length,
-      uniqueCommits: params.commits.length,
-      failedRepositories: failedRepositories.size,
-      skippedRepositories: params.skippedRepositories.length,
-      durationSeconds: params.durationSeconds,
-    },
-    discovery: {
-      repositoriesDiscovered: params.repositoriesDiscovered,
-      repositoriesIncluded: params.repositoriesIncluded,
-    },
-    skippedRepositories: [...params.skippedRepositories].sort((left, right) =>
-      left.repository.localeCompare(right.repository) || left.reason.localeCompare(right.reason),
-    ),
-    perRepository,
-    timeSeries,
-  };
+  const categorizedSkips = categorizeSkips(params.skippedRepositories);
+  const skippedByCategory = countSkippedByCategory(categorizedSkips);
+  const detailedSkips = packageSkippedRepositories(
+    categorizedSkips,
+    params.config.profile,
+  );
 
+  let codeLevel: Statistics["codeLevel"];
   if (params.config.includeDiffStats) {
-    statistics.codeLevel = {
+    codeLevel = {
       totalAdditions: params.commits.reduce(
         (sum, commit) => sum + (commit.additions ?? 0),
         0,
@@ -208,8 +202,9 @@ function buildStatistics(params: {
     };
   }
 
+  let messageCategories: MessageCategorySummary | undefined;
   if (params.config.classifyMessages) {
-    statistics.messageCategories = params.commits.reduce<MessageCategorySummary>(
+    messageCategories = params.commits.reduce<MessageCategorySummary>(
       (accumulator, commit) => {
         const category = commit.messageCategory ?? "other";
         accumulator[category] += 1;
@@ -227,7 +222,131 @@ function buildStatistics(params: {
     );
   }
 
+  const statistics: Statistics = {
+    summary: {
+      repositoriesScanned: params.scannedRepositoryCount,
+      repositoriesWithCommits: repositoriesWithCommits.size,
+      totalCommitsCollected: params.observations.length,
+      uniqueCommits: params.commits.length,
+      failedRepositories: failedRepositories.size,
+      skippedRepositories: skippedByCategory.filter + skippedByCategory.operational,
+      durationSeconds: params.durationSeconds,
+    },
+    discovery: {
+      repositoriesDiscovered: params.repositoriesDiscovered,
+      repositoriesIncluded: params.repositoriesIncluded,
+    },
+    skippedByCategory,
+    skippedRepositories: detailedSkips,
+    highlights: buildHighlights({
+      perRepository,
+      commits: params.commits,
+      failures: params.failures,
+      skippedByCategory,
+      messageCategories,
+      codeLevel,
+    }),
+    perRepository,
+    timeSeries,
+  };
+
+  if (codeLevel) {
+    statistics.codeLevel = codeLevel;
+  }
+
+  if (messageCategories) {
+    statistics.messageCategories = messageCategories;
+  }
+
   return statistics;
+}
+
+function categorizeSkips(skips: SkipRecord[]): SkippedRepository[] {
+  return skips
+    .map((skip) => ({
+      repository: skip.repository,
+      reason: skip.reason,
+      category: classifySkipReason(skip.reason),
+    }))
+    .sort(
+      (left, right) =>
+        left.repository.localeCompare(right.repository) ||
+        left.reason.localeCompare(right.reason),
+    );
+}
+
+function countSkippedByCategory(skips: SkippedRepository[]): SkippedByCategory {
+  const skippedByCategory: SkippedByCategory = { filter: 0, operational: 0 };
+  for (const skip of skips) {
+    skippedByCategory[skip.category] += 1;
+  }
+  return skippedByCategory;
+}
+
+function packageSkippedRepositories(
+  skips: SkippedRepository[],
+  profile: NormalizedConfig["profile"],
+): SkippedRepository[] {
+  if (profile === "operator") {
+    return skips;
+  }
+
+  return skips.filter((skip) => skip.category === "operational");
+}
+
+function buildReportFilters(config: NormalizedConfig): ReportFilters {
+  return {
+    includeOrgs: [...config.includeOrgs],
+    excludeOrgs: [...config.excludeOrgs],
+    includeRepos: [...config.includeRepos],
+    excludeRepos: [...config.excludeRepos],
+    ownedOnly: config.ownedOnly,
+    branchPatterns: config.branchPatterns.map((matcher) => matcher.input),
+  };
+}
+
+function buildHighlights(params: {
+  perRepository: RepositorySummary[];
+  commits: CommitRecord[];
+  failures: FailureRecord[];
+  skippedByCategory: SkippedByCategory;
+  messageCategories?: MessageCategorySummary;
+  codeLevel?: Statistics["codeLevel"];
+}): ReportHighlights {
+  const uniqueCommits = params.commits.length;
+  const wipCount = params.commits.filter((commit) => commit.isWip).length;
+  const topRepositories = [...params.perRepository]
+    .sort((left, right) => {
+      if (right.commitCount !== left.commitCount) {
+        return right.commitCount - left.commitCount;
+      }
+      return left.repository.localeCompare(right.repository);
+    })
+    .slice(0, 5)
+    .map((repo) => ({
+      repository: repo.repository,
+      commitCount: repo.commitCount,
+    }));
+
+  const highlights: ReportHighlights = {
+    topRepositories,
+    uniqueCommits,
+    repositoriesWithCommits: new Set(params.commits.map((commit) => commit.repository)).size,
+    wipShare: uniqueCommits === 0 ? 0 : wipCount / uniqueCommits,
+    failureCount: params.failures.length,
+    operationalSkipCount: params.skippedByCategory.operational,
+    filterSkipCount: params.skippedByCategory.filter,
+  };
+
+  if (params.messageCategories) {
+    highlights.messageCategoryMix = params.messageCategories;
+  }
+
+  if (params.codeLevel) {
+    highlights.codeLevel = params.codeLevel;
+  }
+
+  return highlights;
 }
 
 function buildPerRepositorySummary(
