@@ -126,6 +126,13 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     helpText: "Keep only repositories owned by the authenticated user",
   },
   {
+    flag: "--ignore-local-config",
+    kind: "boolean",
+    cliKey: "ignoreLocalConfig",
+    helpSection: "Repository filters",
+    helpText: "Ignore .gh-work-log.local.json and use CLI flags only",
+  },
+  {
     flag: "--scan-feature-branches",
     kind: "boolean",
     cliKey: "scanFeatureBranches",
@@ -164,6 +171,14 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     localConfigKey: "classifyMessages",
     helpSection: "Enrichment",
     helpText: "Categorize commit messages",
+  },
+  {
+    flag: "--enrich-prs",
+    kind: "boolean",
+    cliKey: "enrichPrs",
+    helpSection: "Enrichment",
+    helpText:
+      "Attach associated pull request number/url/title/state (inspection hint only)",
   },
   {
     flag: "--dry-run",

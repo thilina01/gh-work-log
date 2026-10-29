@@ -21,6 +21,8 @@ const ALL_CLI_OPTION_KEYS: Record<keyof CliOptions, true> = {
   includeDiffStats: true,
   detectWip: true,
   classifyMessages: true,
+  enrichPrs: true,
+  ignoreLocalConfig: true,
   verbose: true,
   dryRun: true,
   html: true,

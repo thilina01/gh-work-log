@@ -20,6 +20,8 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     includeDiffStats: true,
     detectWip: true,
     classifyMessages: true,
+    enrichPrs: false,
+    ignoreLocalConfig: false,
     verbose: false,
     dryRun: false,
     profile: "operator",
@@ -192,8 +194,13 @@ describe("aggregation", () => {
       endedAtMs: Date.parse("2026-04-05T10:00:02.500Z"),
     });
 
-    expect(result.metadata.schemaVersion).toBe("1.1.0");
+    expect(result.metadata.schemaVersion).toBe("1.2.0");
     expect(result.metadata.profile).toBe("operator");
+    expect(result.metadata.enrichPrs).toBe(false);
+    expect(result.metadata.ignoreLocalConfig).toBe(false);
+    expect(result.metadata.tool.name).toBe("gh-work-log");
+    expect(result.metadata.tool.packageVersion).toMatch(/^\d+\.\d+\.\d+/);
+    expect(result.statistics.hints).toBeUndefined();
     expect(result.metadata.filters).toEqual({
       includeOrgs: [],
       excludeOrgs: [],
@@ -324,5 +331,116 @@ describe("aggregation", () => {
     ]);
     expect(result.statistics.highlights.filterSkipCount).toBe(1);
     expect(result.statistics.highlights.operationalSkipCount).toBe(1);
+  });
+
+  it("emits candidate group hints only for the agent profile", () => {
+    const api: RepositoryRecord = {
+      fullName: "org/foo-api",
+      ownerLogin: "org",
+      name: "foo-api",
+      visibility: "private",
+      defaultBranch: "main",
+      isArchived: false,
+      isFork: false,
+      isDisabled: false,
+      isPrivate: true,
+      htmlUrl: "https://github.com/org/foo-api",
+    };
+    const client: RepositoryRecord = {
+      ...api,
+      fullName: "org/foo-client",
+      name: "foo-client",
+      htmlUrl: "https://github.com/org/foo-client",
+    };
+
+    const observations = [
+      {
+        repository: api.fullName,
+        defaultBranch: "main",
+        scanBranch: "main",
+        sha: "aaa",
+        message: "feat: handle #42",
+        messageHeadline: "feat: handle #42",
+        authoredDateTime: "2026-03-02T10:00:00.000Z",
+        committedDateTime: "2026-03-02T10:01:00.000Z",
+        url: "https://github.com/org/foo-api/commit/aaa",
+        sourceMode: "default_branch" as const,
+        authorLogin: "alice",
+        authorEmail: "alice@example.com",
+        parentCount: 1,
+        mergeIncludesExternalAuthor: false,
+        mergeBranchAuthorLogin: null,
+      },
+      {
+        repository: client.fullName,
+        defaultBranch: "main",
+        scanBranch: "main",
+        sha: "bbb",
+        message: "feat: show #42",
+        messageHeadline: "feat: show #42",
+        authoredDateTime: "2026-03-02T11:00:00.000Z",
+        committedDateTime: "2026-03-02T11:01:00.000Z",
+        url: "https://github.com/org/foo-client/commit/bbb",
+        sourceMode: "default_branch" as const,
+        authorLogin: "alice",
+        authorEmail: "alice@example.com",
+        parentCount: 1,
+        mergeIncludesExternalAuthor: false,
+        mergeBranchAuthorLogin: null,
+      },
+    ];
+
+    const agent = buildRunResult({
+      config: makeConfig({ profile: "agent", includeDiffStats: false }),
+      authenticatedUser: "alice",
+      targetAuthor: "alice",
+      repositoriesDiscovered: 2,
+      repositoriesIncluded: 2,
+      scannedRepositoryCount: 2,
+      observations,
+      repositoryMap: new Map([
+        [api.fullName, api],
+        [client.fullName, client],
+      ]),
+      skippedRepositories: [],
+      failures: [],
+      startedAtMs: Date.parse("2026-04-05T10:00:00.000Z"),
+      endedAtMs: Date.parse("2026-04-05T10:00:01.000Z"),
+    });
+
+    const operator = buildRunResult({
+      config: makeConfig({ profile: "operator", includeDiffStats: false }),
+      authenticatedUser: "alice",
+      targetAuthor: "alice",
+      repositoriesDiscovered: 2,
+      repositoriesIncluded: 2,
+      scannedRepositoryCount: 2,
+      observations,
+      repositoryMap: new Map([
+        [api.fullName, api],
+        [client.fullName, client],
+      ]),
+      skippedRepositories: [],
+      failures: [],
+      startedAtMs: Date.parse("2026-04-05T10:00:00.000Z"),
+      endedAtMs: Date.parse("2026-04-05T10:00:01.000Z"),
+    });
+
+    expect(operator.statistics.hints).toBeUndefined();
+    expect(agent.statistics.hints?.candidateGroups.length).toBeGreaterThan(0);
+    expect(agent.data.map((commit) => commit.sha).sort()).toEqual(
+      operator.data.map((commit) => commit.sha).sort(),
+    );
+    for (const group of agent.statistics.hints?.candidateGroups ?? []) {
+      expect(group.kind).toBe("hint");
+      for (const member of group.commits) {
+        expect(
+          agent.data.some(
+            (commit) =>
+              commit.repository === member.repository && commit.sha === member.sha,
+          ),
+        ).toBe(true);
+      }
+    }
   });
 });

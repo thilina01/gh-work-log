@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  AssociatedPullRequest,
   AuthenticatedUser,
   CommandRunner,
   CommitDiffStats,
@@ -11,6 +12,7 @@ import {
   TargetIdentity,
 } from "../types";
 import { Logger } from "../logger";
+import { mapGraphqlAssociatedPulls } from "./associated-pulls";
 import { isWithinRange, toUtcIso } from "../utils/dates";
 import { optionalBoolean, optionalString, requiredString } from "../utils/validation";
 
@@ -297,6 +299,29 @@ export class GitHubClient {
       deletions: response.stats?.deletions ?? 0,
       filesChanged: response.files?.length ?? 0,
     };
+  }
+
+  public async getAssociatedPullRequests(
+    repository: RepositoryRecord,
+    sha: string,
+  ): Promise<AssociatedPullRequest[]> {
+    const response = await this.getJson<
+      Array<{
+        number?: number;
+        html_url?: string;
+        title?: string;
+        state?: string;
+      }>
+    >([`/repos/${repository.fullName}/commits/${sha}/pulls`], "associated_pulls_failed");
+
+    return mapGraphqlAssociatedPulls(
+      (Array.isArray(response) ? response : []).map((pull) => ({
+        number: pull.number,
+        url: pull.html_url,
+        title: pull.title,
+        state: pull.state,
+      })),
+    );
   }
 
   private async fetchCommitHistory(

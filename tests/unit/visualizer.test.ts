@@ -5,7 +5,7 @@ import { RunResult } from "../../src/types";
 function makeReport(overrides: Partial<RunResult> = {}): RunResult {
   const base: RunResult = {
     metadata: {
-      schemaVersion: "1.1.0",
+      schemaVersion: "1.2.0",
       generatedAt: "2026-04-06T05:32:01.316Z",
       authenticatedUser: "thilina01",
       targetAuthor: "thilina01",
@@ -16,6 +16,8 @@ function makeReport(overrides: Partial<RunResult> = {}): RunResult {
       detectWip: false,
       includeDiffStats: true,
       classifyMessages: true,
+      enrichPrs: false,
+      ignoreLocalConfig: false,
       dryRun: false,
       profile: "operator",
       filters: {
@@ -28,6 +30,10 @@ function makeReport(overrides: Partial<RunResult> = {}): RunResult {
       },
       filterField: "authoredDateTime",
       wipDetectionIsHeuristic: true,
+      tool: {
+        name: "gh-work-log",
+        packageVersion: "1.0.0",
+      },
     },
     statistics: {
       summary: {
