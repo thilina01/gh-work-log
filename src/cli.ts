@@ -11,10 +11,13 @@ import { runApp } from "./app";
 import { toErrorMessage } from "./utils/errors";
 import { writeFileEnsuringDir } from "./utils/files";
 import { replaceExtension } from "./utils/paths";
+import { warnIfDistAppearsStale } from "./tool-identity";
 import { renderHtmlReport } from "./visualizer/render";
 
 async function main(): Promise<void> {
   try {
+    warnIfDistAppearsStale();
+
     const parsedOptions = parseCliArgs(process.argv.slice(2));
 
     if (parsedOptions.help) {
@@ -23,7 +26,9 @@ async function main(): Promise<void> {
       return;
     }
 
-    const localConfig = loadLocalConfigFile();
+    const localConfig = parsedOptions.ignoreLocalConfig
+      ? {}
+      : loadLocalConfigFile();
     const options = mergeCliOptions(parsedOptions, localConfig);
     const config = normalizeConfig(options);
     const result = await runApp(config);

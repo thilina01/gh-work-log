@@ -27,6 +27,8 @@ export interface CliOptions {
   includeDiffStats: boolean;
   detectWip: boolean;
   classifyMessages: boolean;
+  enrichPrs: boolean;
+  ignoreLocalConfig: boolean;
   verbose: boolean;
   dryRun: boolean;
   html: boolean;
@@ -80,11 +82,37 @@ export interface NormalizedConfig {
   includeDiffStats: boolean;
   detectWip: boolean;
   classifyMessages: boolean;
+  enrichPrs: boolean;
+  ignoreLocalConfig: boolean;
   verbose: boolean;
   dryRun: boolean;
   profile: ReportProfile;
   concurrency: number;
   retryPolicy: RetryPolicy;
+}
+
+export interface ToolIdentity {
+  name: string;
+  packageVersion: string;
+}
+
+export interface AssociatedPullRequest {
+  number: number;
+  url: string;
+  title: string;
+  state: string;
+}
+
+export interface CandidateGroupHint {
+  kind: "hint";
+  id: string;
+  reason: string;
+  commits: Array<{ repository: string; sha: string }>;
+}
+
+export interface ReportHints {
+  /** Non-authoritative triage groupings for agent profiles only. */
+  candidateGroups: CandidateGroupHint[];
 }
 
 export interface AuthenticatedUser {
@@ -193,6 +221,8 @@ export interface CommitRecord extends Partial<CommitDiffStats> {
   mergeIncludesExternalAuthor: boolean;
   mergeBranchAuthorLogin: string | null;
   messageCategory?: MessageCategory;
+  /** Inspection hint only; never treat title/state as profile evidence. */
+  associatedPullRequests?: AssociatedPullRequest[];
 }
 
 export interface RepositorySummary {
@@ -269,10 +299,12 @@ export interface Statistics {
   timeSeries: TimeSeriesSummary;
   codeLevel?: CodeLevelSummary;
   messageCategories?: MessageCategorySummary;
+  /** Present only for the agent profile. */
+  hints?: ReportHints;
 }
 
 export interface RunMetadata {
-  schemaVersion: "1.1.0";
+  schemaVersion: "1.2.0";
   generatedAt: string;
   authenticatedUser: string;
   targetAuthor: string;
@@ -283,11 +315,14 @@ export interface RunMetadata {
   detectWip: boolean;
   includeDiffStats: boolean;
   classifyMessages: boolean;
+  enrichPrs: boolean;
+  ignoreLocalConfig: boolean;
   dryRun: boolean;
   profile: ReportProfile;
   filters: ReportFilters;
   filterField: "authoredDateTime";
   wipDetectionIsHeuristic: true;
+  tool: ToolIdentity;
 }
 
 export interface RunResult {

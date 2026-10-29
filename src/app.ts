@@ -1,7 +1,9 @@
 import { buildRunResult } from "./aggregation";
+import { enrichAssociatedPullRequests } from "./github/associated-pulls";
 import { GitHubApiError, GitHubClient } from "./github/client";
 import { Logger } from "./logger";
 import {
+  AssociatedPullRequest,
   CommandRunner,
   CommitObservation,
   FailureRecord,
@@ -45,6 +47,10 @@ export interface GitHubClientLike {
     repository: RepositoryRecord,
     sha: string,
   ): Promise<{ additions: number; deletions: number; filesChanged: number }>;
+  getAssociatedPullRequests?(
+    repository: RepositoryRecord,
+    sha: string,
+  ): Promise<AssociatedPullRequest[]>;
 }
 
 export async function runApp(
@@ -151,6 +157,24 @@ export async function runApp(
     startedAtMs,
     endedAtMs: now(),
   });
+
+  if (config.enrichPrs && result.data.length > 0) {
+    logger.info("Enriching associated pull requests");
+    const lookup =
+      client.getAssociatedPullRequests?.bind(client) ??
+      (async () => [] as AssociatedPullRequest[]);
+    result.data = await enrichAssociatedPullRequests({
+      commits: result.data,
+      repositoryMap,
+      client: { getAssociatedPullRequests: lookup },
+      concurrency: config.concurrency,
+      onError: (repository, sha, error) => {
+        logger.info(
+          `Associated PR lookup failed for ${repository}@${sha}: ${toErrorMessage(error)}`,
+        );
+      },
+    });
+  }
 
   await writeJson(config.outputPath, result);
   logger.info(

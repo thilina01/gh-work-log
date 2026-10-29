@@ -115,6 +115,8 @@ describe("config parsing", () => {
       parseCliArgs(["--since", "2026-03-01", "--until", "2026-04-01"]),
     );
     expect(defaultConfig.profile).toBe("operator");
+    expect(defaultConfig.ignoreLocalConfig).toBe(false);
+    expect(defaultConfig.enrichPrs).toBe(false);
 
     const managementConfig = normalizeConfig(
       parseCliArgs([
@@ -127,6 +129,49 @@ describe("config parsing", () => {
       ]),
     );
     expect(managementConfig.profile).toBe("management");
+  });
+
+  it("parses --ignore-local-config and --enrich-prs", () => {
+    const config = normalizeConfig(
+      parseCliArgs([
+        "--since",
+        "2026-03-01",
+        "--until",
+        "2026-04-01",
+        "--ignore-local-config",
+        "--enrich-prs",
+        "--owned-only",
+      ]),
+    );
+    expect(config.ignoreLocalConfig).toBe(true);
+    expect(config.enrichPrs).toBe(true);
+    expect(config.ownedOnly).toBe(true);
+  });
+
+  it("can merge without local defaults when ignoreLocalConfig is used at CLI layer", () => {
+    const fixtureDir = mkdtempSync(path.join(tmpdir(), "gh-work-log-ignore-local-"));
+    writeFileSync(
+      path.join(fixtureDir, ".gh-work-log.local.json"),
+      JSON.stringify({
+        includeOrgs: ["OTR-Lanka"],
+      }),
+    );
+
+    const parsed = parseCliArgs([
+      "--since",
+      "2026-03-01",
+      "--until",
+      "2026-04-01",
+      "--ignore-local-config",
+      "--owned-only",
+    ]);
+    const localConfig = parsed.ignoreLocalConfig ? {} : loadLocalConfigFile(fixtureDir);
+    const config = normalizeConfig(mergeCliOptions(parsed, localConfig));
+
+    expect(config.includeOrgs).toEqual([]);
+    expect(config.ownedOnly).toBe(true);
+    expect(config.ignoreLocalConfig).toBe(true);
+    expect(loadLocalConfigFile(fixtureDir).includeOrgs).toEqual(["OTR-Lanka"]);
   });
 
   it("rejects invalid profile values", () => {

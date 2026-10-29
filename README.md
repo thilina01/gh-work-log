@@ -210,21 +210,25 @@ Optional enrichments and execution flags:
 - `--include-diff-stats`
 - `--detect-wip`
 - `--classify-messages`
+- `--enrich-prs`: attach associated pull request number/url/title/state (inspection hint only; default off)
+- `--ignore-local-config`: ignore `.gh-work-log.local.json` and use CLI flags only
 - `--dry-run`
 - `--html`: also render the HTML dashboard right after the JSON is written, using the same base name as `--output`
 - `--profile`: report packaging profile — `operator` (default), `management`, or `agent`
 - `--verbose`
 - `--help`
 
+When a local checkout’s `src/` is newer than `dist/cli.js`, the CLI prints a stderr warning recommending `npm run build`. The scan still runs; callers such as profile refresh should stop and rebuild rather than trusting a stale build.
+
 ### Report profiles
 
 Profiles reshape JSON/HTML packaging only. They do **not** change discovery, filtering, or commit scanning.
 
-| Profile | Intended use | Skip packaging |
-|---|---|---|
-| `operator` | Debugging / full fidelity | All skips listed with `category` |
-| `management` | Monthly org progress review | Filter skips collapsed to counts; operational skips kept detailed |
-| `agent` | AI/personal-profile automation | Same collapse as `management` |
+| Profile | Intended use | Skip packaging | Extra packaging |
+|---|---|---|---|
+| `operator` | Debugging / full fidelity | All skips listed with `category` | None |
+| `management` | Monthly org progress review | Filter skips collapsed to counts; operational skips kept detailed | Human/HTML-oriented highlights |
+| `agent` | AI/personal-profile automation | Same collapse as `management` | `statistics.hints.candidateGroups` triage hints |
 
 Recommended presets:
 
@@ -238,14 +242,30 @@ node dist/cli.js \
   --html \
   --output ./tmp/report-management.json
 
-# Agent / personal-profile ingestion
+# Profile agent discovery (employer / org scope)
 node dist/cli.js \
   --since 2026-03-01 \
   --until 2026-04-01 \
+  --include-org OTR-Lanka \
   --profile agent \
+  --include-diff-stats \
+  --detect-wip \
   --classify-messages \
-  --emails you@example.com \
+  --enrich-prs \
   --output ./tmp/report-agent.json
+
+# Personal-project agent scan from the gh-work-log checkout
+node dist/cli.js \
+  --since 2026-03-01 \
+  --until 2026-04-01 \
+  --ignore-local-config \
+  --owned-only \
+  --profile agent \
+  --include-diff-stats \
+  --detect-wip \
+  --classify-messages \
+  --enrich-prs \
+  --output ./tmp/report-agent-personal.json
 ```
 
 ## Local Config File
@@ -383,14 +403,15 @@ Every report includes these top-level sections:
 
 High-level metadata includes:
 
-- schema version (`1.1.0`)
+- schema version (`1.2.0`)
 - generated timestamp
 - authenticated user
 - target author
 - normalized `since` and `until`
-- scan mode and feature flags
+- scan mode and feature flags (`detectWip`, `includeDiffStats`, `classifyMessages`, `enrichPrs`, `ignoreLocalConfig`, `dryRun`)
 - report `profile`
 - applied `filters` (`includeOrgs`, `excludeOrgs`, `includeRepos`, `excludeRepos`, `ownedOnly`, `branchPatterns`)
+- `tool` identity (`name`, `packageVersion`)
 
 Statistics includes:
 
@@ -403,6 +424,9 @@ Statistics includes:
 - time-series summary
 - optional code-level summary when diff stats are enabled
 - optional message-category summary when classification is enabled
+- optional `hints.candidateGroups` for `agent` only (non-authoritative triage; not achievements)
+
+Commit records may include `associatedPullRequests` when `--enrich-prs` is enabled. Each entry has `number`, `url`, `title`, and `state` only. Treat these as inspection hints, never as profile evidence by themselves.
 
 Skip categories:
 

@@ -16,7 +16,9 @@ import {
   TimeSeriesSummary,
 } from "./types";
 import { classifyMessage } from "./classification";
+import { buildCandidateGroupHints } from "./hints/candidate-groups";
 import { classifySkipReason } from "./skip-taxonomy";
+import { readToolIdentity } from "./tool-identity";
 import { groupBy, repositoryShaKey } from "./utils/collections";
 import { dayKey, monthKey, roundDurationSeconds, weekStartIso } from "./utils/dates";
 
@@ -54,7 +56,7 @@ export function buildRunResult(params: {
 
   return {
     metadata: {
-      schemaVersion: "1.1.0",
+      schemaVersion: "1.2.0",
       generatedAt: new Date(params.endedAtMs).toISOString(),
       authenticatedUser: params.authenticatedUser,
       targetAuthor: params.targetAuthor,
@@ -67,11 +69,14 @@ export function buildRunResult(params: {
       detectWip: params.config.detectWip,
       includeDiffStats: params.config.includeDiffStats,
       classifyMessages: params.config.classifyMessages,
+      enrichPrs: params.config.enrichPrs,
+      ignoreLocalConfig: params.config.ignoreLocalConfig,
       dryRun: params.config.dryRun,
       profile: params.config.profile,
       filters: buildReportFilters(params.config),
       filterField: "authoredDateTime",
       wipDetectionIsHeuristic: true,
+      tool: readToolIdentity(),
     },
     statistics,
     failures: sortFailures(params.failures),
@@ -256,6 +261,12 @@ function buildStatistics(params: {
 
   if (messageCategories) {
     statistics.messageCategories = messageCategories;
+  }
+
+  if (params.config.profile === "agent") {
+    statistics.hints = {
+      candidateGroups: buildCandidateGroupHints(params.commits),
+    };
   }
 
   return statistics;

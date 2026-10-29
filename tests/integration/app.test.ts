@@ -21,6 +21,8 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     includeDiffStats: true,
     detectWip: true,
     classifyMessages: true,
+    enrichPrs: false,
+    ignoreLocalConfig: false,
     verbose: false,
     dryRun: false,
     profile: "operator",
@@ -137,8 +139,11 @@ describe("runApp", () => {
       repositoriesDiscovered: 2,
       repositoriesIncluded: 2,
     });
-    expect(result.metadata.schemaVersion).toBe("1.1.0");
+    expect(result.metadata.schemaVersion).toBe("1.2.0");
     expect(result.metadata.profile).toBe("operator");
+    expect(result.metadata.tool.name).toBe("gh-work-log");
+    expect(result.metadata.ignoreLocalConfig).toBe(false);
+    expect(result.metadata.enrichPrs).toBe(false);
     expect(result.statistics.skippedRepositories).toContainEqual({
       repository: "org/disabled",
       reason: "disabled_repository",
