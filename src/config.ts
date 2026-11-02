@@ -23,8 +23,6 @@ import { toErrorMessage } from "./utils/errors";
 import { compileBranchPatterns } from "./utils/patterns";
 import { optionalBoolean, optionalString, optionalStringArray } from "./utils/validation";
 
-const REPORT_PROFILES = new Set<ReportProfile>(["operator", "management", "agent"]);
-
 export { DEFAULT_LOCAL_CONFIG_FILE, DEFAULT_OUTPUT_DIR };
 
 export function parseCliArgs(argv: string[]): CliOptions {
@@ -106,11 +104,11 @@ export function loadLocalConfigFile(
     throw new Error(`Failed to parse ${fileName}: ${toErrorMessage(error)}`);
   }
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new Error(`Expected ${fileName} to contain a JSON object.`);
   }
 
-  return validateLocalConfigFile(parsed as Record<string, unknown>, fileName);
+  return validateLocalConfigFile(parsed, fileName);
 }
 
 export function mergeCliOptions(
@@ -130,14 +128,23 @@ export function mergeCliOptions(
     }
 
     if (definition.kind === "list") {
+      if (!Array.isArray(localValue)) {
+        throw new Error(`Invalid local configuration value for ${definition.localConfigKey}.`);
+      }
       merged[definition.cliKey] = [
-        ...(localValue as string[]),
+        ...localValue,
         ...cliOptions[definition.cliKey],
       ];
     } else if (definition.kind === "boolean") {
-      merged[definition.cliKey] = Boolean(localValue) || cliOptions[definition.cliKey];
+      if (typeof localValue !== "boolean") {
+        throw new Error(`Invalid local configuration value for ${definition.localConfigKey}.`);
+      }
+      merged[definition.cliKey] = localValue || cliOptions[definition.cliKey];
     } else {
-      merged[definition.cliKey] = cliOptions[definition.cliKey] ?? (localValue as string);
+      if (typeof localValue !== "string") {
+        throw new Error(`Invalid local configuration value for ${definition.localConfigKey}.`);
+      }
+      merged[definition.cliKey] = cliOptions[definition.cliKey] ?? localValue;
     }
   }
 
@@ -152,6 +159,7 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
   const since = parseSince(options.since);
   const until = parseUntil(options.until);
   assertSinceBeforeUntil(since, until);
+  const requestedAuthor = options.author?.trim();
 
   return {
     since,
@@ -159,7 +167,7 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     sinceIso: since.toISOString(),
     untilIso: until.toISOString(),
     outputPath: path.resolve(options.output ?? defaultOutputPath(since, until)),
-    requestedAuthor: options.author?.trim() || undefined,
+    ...(requestedAuthor ? { requestedAuthor } : {}),
     emails: normalizeList(options.emails),
     includeOrgs: normalizeList(options.includeOrgs),
     excludeOrgs: normalizeList(options.excludeOrgs),
@@ -190,13 +198,21 @@ function parseReportProfile(value: string | undefined): ReportProfile {
   }
 
   const normalized = value.trim().toLowerCase();
-  if (!REPORT_PROFILES.has(normalized as ReportProfile)) {
+  if (!isReportProfile(normalized)) {
     throw new Error(
       `Invalid --profile "${value}". Expected one of: operator, management, agent.`,
     );
   }
 
-  return normalized as ReportProfile;
+  return normalized;
+}
+
+function isReportProfile(value: string): value is ReportProfile {
+  return value === "operator" || value === "management" || value === "agent";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function renderHelp(): string {
@@ -289,26 +305,34 @@ function validateLocalConfigFile(
 
     const raw = value[definition.localConfigKey];
     if (definition.kind === "boolean") {
-      result[definition.localConfigKey] = optionalBoolean(
+      const parsed = optionalBoolean(
         raw,
         definition.localConfigKey,
         fileName,
       );
+      if (parsed !== undefined) {
+        result[definition.localConfigKey] = parsed;
+      }
     } else if (definition.kind === "list") {
-      result[definition.localConfigKey] = optionalStringArray(
+      const parsed = optionalStringArray(
         raw,
         definition.localConfigKey,
         fileName,
       );
+      if (parsed !== undefined) {
+        result[definition.localConfigKey] = parsed;
+      }
     } else {
-      result[definition.localConfigKey] = optionalString(
+      const parsed = optionalString(
         raw,
         definition.localConfigKey,
         fileName,
       );
+      if (parsed !== undefined) {
+        result[definition.localConfigKey] = parsed;
+      }
     }
   }
 
   return result as LocalConfigFile;
 }
-

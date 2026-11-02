@@ -9,7 +9,6 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     sinceIso: "2026-03-01T00:00:00.000Z",
     untilIso: "2026-04-01T00:00:00.000Z",
     outputPath: "/tmp/report.json",
-    requestedAuthor: undefined,
     emails: [],
     includeOrgs: [],
     excludeOrgs: [],
@@ -115,6 +114,56 @@ class FakeGitHubClient implements GitHubClientLike {
 }
 
 describe("runApp", () => {
+  it("scans branches concurrently without exceeding the configured global limit", async () => {
+    const repositories = [makeRepository("org/first"), makeRepository("org/second")];
+    const client = new FakeGitHubClient(repositories, {
+      "org/first": [
+        { branch: "main", commits: [] },
+        { branch: "feature/a", commits: [] },
+        { branch: "feature/b", commits: [] },
+      ],
+      "org/second": [
+        { branch: "main", commits: [] },
+        { branch: "feature/c", commits: [] },
+        { branch: "feature/d", commits: [] },
+      ],
+    });
+    const originalListBranchCommits = client.listBranchCommits.bind(client);
+    let activeRequests = 0;
+    let peakRequests = 0;
+    let activeFeatureRequests = 0;
+    let peakFeatureRequests = 0;
+    const scannedBranches: string[] = [];
+
+    client.listBranchCommits = async (params) => {
+      activeRequests += 1;
+      peakRequests = Math.max(peakRequests, activeRequests);
+      if (params.branch !== "main") {
+        activeFeatureRequests += 1;
+        peakFeatureRequests = Math.max(peakFeatureRequests, activeFeatureRequests);
+      }
+      scannedBranches.push(`${params.repository.fullName}:${params.branch}`);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await originalListBranchCommits(params);
+      } finally {
+        activeRequests -= 1;
+        if (params.branch !== "main") {
+          activeFeatureRequests -= 1;
+        }
+      }
+    };
+
+    await runApp(makeConfig({ concurrency: 2 }), {
+      client,
+      writeJson: async () => {},
+    });
+
+    expect(peakRequests).toBe(2);
+    expect(peakFeatureRequests).toBe(2);
+    expect(scannedBranches).toHaveLength(6);
+  });
+
   it("writes a dry-run result with discovery and skip details", async () => {
     const repositories = [
       makeRepository("alice/project-a"),

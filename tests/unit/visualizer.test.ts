@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { JSDOM } from "jsdom";
 import { renderHtmlReport } from "../../src/visualizer/render";
 import { RunResult } from "../../src/types";
+import { parseReportJson } from "../../src/report-validation";
 
 function makeReport(overrides: Partial<RunResult> = {}): RunResult {
   const base: RunResult = {
@@ -171,6 +173,75 @@ function makeReport(overrides: Partial<RunResult> = {}): RunResult {
 }
 
 describe("renderHtmlReport", () => {
+  it("accepts a complete report and rejects malformed report data", () => {
+    const report = makeReport();
+
+    expect(parseReportJson(JSON.stringify(report))).toEqual(report);
+    const agentReport = makeReport();
+    agentReport.metadata.profile = "agent";
+    agentReport.statistics.hints = {
+      candidateGroups: [
+        {
+          kind: "hint",
+          id: "group-1",
+          reason: "Related commits",
+          commits: [{ repository: "org/app", sha: "abc123456" }],
+        },
+      ],
+    };
+    expect(parseReportJson(JSON.stringify(agentReport))).toEqual(agentReport);
+    expect(() => parseReportJson("{")).toThrow("Input is not valid JSON:");
+    expect(() =>
+      parseReportJson(JSON.stringify({ metadata: {}, data: [], failures: [] })),
+    ).toThrow("Invalid report: expected statistics to be an object.");
+    expect(() =>
+      parseReportJson(
+        JSON.stringify({
+          ...report,
+          data: [{ ...report.data[0], isWip: "false" }],
+        }),
+      ),
+    ).toThrow("Invalid report: expected data[0].isWip to be a boolean.");
+  });
+
+  it("filters and sorts commits in the rendered dashboard", () => {
+    const report = makeReport();
+    const firstCommit = report.data[0]!;
+    report.data.push({
+      ...firstCommit,
+      sha: "def123456",
+      message: "fix: later dashboard update",
+      authoredDateTime: "2026-03-21T10:00:00.000Z",
+    });
+
+    const dom = new JSDOM(renderHtmlReport(report), {
+      runScripts: "dangerously",
+      url: "https://report.example/",
+    });
+    const { document, Event, MouseEvent } = dom.window;
+    const tableBody = document.getElementById("commit-table-body")!;
+    const search = document.getElementById("commit-search") as HTMLInputElement;
+    const repositoryFilter = document.getElementById("repo-filter") as HTMLSelectElement;
+
+    expect(tableBody.querySelectorAll("tr.commit-row")).toHaveLength(2);
+    repositoryFilter.value = "org/app";
+    repositoryFilter.dispatchEvent(new Event("change"));
+    expect(tableBody.querySelectorAll("tr.commit-row")).toHaveLength(2);
+
+    search.value = "fix: later";
+    search.dispatchEvent(new Event("input"));
+    expect(tableBody.querySelectorAll("tr.commit-row")).toHaveLength(1);
+    expect(tableBody.textContent).toContain("fix: later dashboard update");
+
+    search.value = "";
+    search.dispatchEvent(new Event("input"));
+    document.querySelector<HTMLElement>('[data-sort-key="authoredDateTime"]')!.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    expect(tableBody.querySelector("tr.commit-row")?.textContent).toContain("abc12345");
+    dom.window.close();
+  });
+
   it("renders summary, repository, and commit content into standalone html", () => {
     const html = renderHtmlReport(makeReport());
 

@@ -1,6 +1,9 @@
 import { buildRunResult } from "./aggregation";
 import { enrichAssociatedPullRequests } from "./github/associated-pulls";
-import { GitHubApiError, GitHubClient } from "./github/client";
+import { GitHubClient } from "./github/client";
+import { GitHubClientLike } from "./github/client-interface";
+import { scanRepository } from "./app/scan-repository";
+import { toFailure } from "./app/failure";
 import { Logger } from "./logger";
 import {
   AssociatedPullRequest,
@@ -11,13 +14,13 @@ import {
   RepositoryRecord,
   RunResult,
   SkipRecord,
-  TargetIdentity,
 } from "./types";
-import { mapLimit } from "./utils/async";
+import { createSemaphore, mapLimit } from "./utils/async";
 import { groupBy, parseRepositoryShaKey, repositoryShaKey } from "./utils/collections";
 import { toErrorMessage } from "./utils/errors";
 import { writeFileEnsuringDir } from "./utils/files";
-import { matchesBranch } from "./utils/patterns";
+
+export type { GitHubClientLike } from "./github/client-interface";
 
 export interface AppDependencies {
   client?: GitHubClientLike;
@@ -25,32 +28,6 @@ export interface AppDependencies {
   logger?: Logger;
   now?: () => number;
   writeJson?: (outputPath: string, result: RunResult) => Promise<void>;
-}
-
-export interface GitHubClientLike {
-  validateGhInstallation(): Promise<void>;
-  validateAuthentication(): Promise<void>;
-  getAuthenticatedUser(): Promise<{ login: string; id: string }>;
-  resolveTargetIdentity(
-    requestedAuthor: string | undefined,
-    authenticatedUser: { login: string; id: string },
-    emails: string[],
-  ): Promise<TargetIdentity>;
-  listRepositories(): Promise<RepositoryRecord[]>;
-  listBranches(repository: RepositoryRecord): Promise<string[]>;
-  listBranchCommits(params: {
-    repository: RepositoryRecord;
-    branch: string;
-    target: TargetIdentity;
-  }): Promise<{ observations: CommitObservation[]; missingRef: boolean }>;
-  getCommitDiffStats(
-    repository: RepositoryRecord,
-    sha: string,
-  ): Promise<{ additions: number; deletions: number; filesChanged: number }>;
-  getAssociatedPullRequests?(
-    repository: RepositoryRecord,
-    sha: string,
-  ): Promise<AssociatedPullRequest[]>;
 }
 
 export async function runApp(
@@ -114,6 +91,7 @@ export async function runApp(
     return result;
   }
 
+  const scanSemaphore = createSemaphore(config.concurrency);
   const scanResults = await mapLimit(
     filtered.scannable,
     config.concurrency,
@@ -124,6 +102,7 @@ export async function runApp(
         repository,
         targetIdentity,
         logger,
+        scanSemaphore,
       }),
   );
 
@@ -272,78 +251,6 @@ export function filterRepositories(
   return { passedFilters, scannable, skipped };
 }
 
-async function scanRepository(params: {
-  client: GitHubClientLike;
-  config: NormalizedConfig;
-  repository: RepositoryRecord;
-  targetIdentity: TargetIdentity;
-  logger: Logger;
-}): Promise<{
-  observations: CommitObservation[];
-  failures: FailureRecord[];
-  skippedRepositories: SkipRecord[];
-}> {
-  const { client, config, repository, targetIdentity, logger } = params;
-  const observations: CommitObservation[] = [];
-  const failures: FailureRecord[] = [];
-  const skippedRepositories: SkipRecord[] = [];
-
-  logger.info(`Scanning ${repository.fullName}`);
-
-  try {
-    const defaultBranchResult = await client.listBranchCommits({
-      repository,
-      branch: repository.defaultBranch ?? "HEAD",
-      target: targetIdentity,
-    });
-
-    if (defaultBranchResult.missingRef) {
-      skippedRepositories.push({
-        repository: repository.fullName,
-        reason: "empty_repository",
-      });
-      return { observations, failures, skippedRepositories };
-    }
-
-    observations.push(...defaultBranchResult.observations);
-  } catch (error) {
-    failures.push(toFailure(error, repository.fullName, "default_branch_scan"));
-    return { observations, failures, skippedRepositories };
-  }
-
-  if (!config.scanFeatureBranches) {
-    return { observations, failures, skippedRepositories };
-  }
-
-  let branches: string[] = [];
-  try {
-    branches = await client.listBranches(repository);
-  } catch (error) {
-    failures.push(toFailure(error, repository.fullName, "branch_listing"));
-    return { observations, failures, skippedRepositories };
-  }
-
-  const candidateBranches = branches
-    .filter((branch) => branch !== repository.defaultBranch)
-    .filter((branch) => matchesBranch(branch, config.branchPatterns));
-
-  for (const branch of candidateBranches) {
-    try {
-      const result = await client.listBranchCommits({
-        repository,
-        branch,
-        target: targetIdentity,
-      });
-
-      observations.push(...result.observations);
-    } catch (error) {
-      failures.push(toFailure(error, repository.fullName, `feature_branch_scan:${branch}`));
-    }
-  }
-
-  return { observations, failures, skippedRepositories };
-}
-
 async function enrichDiffStats(
   observations: CommitObservation[],
   repositoryMap: Map<string, RepositoryRecord>,
@@ -378,24 +285,6 @@ async function enrichDiffStats(
   });
 
   return failures;
-}
-
-function toFailure(
-  error: unknown,
-  repository: string,
-  stage: string,
-): FailureRecord {
-  if (error instanceof GitHubApiError) {
-    return error.toFailure(repository, stage);
-  }
-
-  return {
-    repository,
-    stage,
-    errorType: "unexpected_error",
-    message: toErrorMessage(error),
-    retryCount: 0,
-  };
 }
 
 async function defaultWriteJson(outputPath: string, result: RunResult): Promise<void> {

@@ -145,7 +145,12 @@ export function buildCommitRecords(
       (item) => item.additions !== undefined,
     );
 
-    if (config.includeDiffStats && diffObservation?.additions !== undefined) {
+    if (
+      config.includeDiffStats &&
+      diffObservation?.additions !== undefined &&
+      diffObservation.deletions !== undefined &&
+      diffObservation.filesChanged !== undefined
+    ) {
       record.additions = diffObservation.additions;
       record.deletions = diffObservation.deletions;
       record.filesChanged = diffObservation.filesChanged;
@@ -248,8 +253,8 @@ function buildStatistics(params: {
       commits: params.commits,
       failures: params.failures,
       skippedByCategory,
-      messageCategories,
-      codeLevel,
+      ...(messageCategories ? { messageCategories } : {}),
+      ...(codeLevel ? { codeLevel } : {}),
     }),
     perRepository,
     timeSeries,

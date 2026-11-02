@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { renderHtmlReport } from "./visualizer/render";
-import { RunResult } from "./types";
+import { parseReportJson } from "./report-validation";
 import { splitFlagToken } from "./utils/cli-tokens";
 import { toErrorMessage } from "./utils/errors";
 import { writeFileEnsuringDir } from "./utils/files";
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
 
     const inputPath = path.resolve(options.input);
     const outputPath = path.resolve(options.output ?? replaceExtension(inputPath, ".html"));
-    const report = parseReport(await readFile(inputPath, "utf8"));
+    const report = parseReportJson(await readFile(inputPath, "utf8"));
     const html = renderHtmlReport(report);
 
     await writeFileEnsuringDir(outputPath, html);
@@ -93,16 +93,6 @@ function renderHelp(): string {
     "  --output    Destination HTML path",
     "  --help      Show this help text",
   ].join("\n");
-}
-
-function parseReport(value: string): RunResult {
-  const parsed = JSON.parse(value) as Partial<RunResult>;
-
-  if (!parsed.metadata || !parsed.statistics || !parsed.failures || !parsed.data) {
-    throw new Error("Input does not match the expected report shape.");
-  }
-
-  return parsed as RunResult;
 }
 
 void main();

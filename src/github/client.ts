@@ -1,12 +1,9 @@
-import { spawn } from "node:child_process";
 import {
   AssociatedPullRequest,
   AuthenticatedUser,
   CommandRunner,
   CommitDiffStats,
   CommitObservation,
-  FailureRecord,
-  GitHubRunnerResult,
   NormalizedConfig,
   RepositoryRecord,
   TargetIdentity,
@@ -14,132 +11,50 @@ import {
 import { Logger } from "../logger";
 import { mapGraphqlAssociatedPulls } from "./associated-pulls";
 import { isWithinRange, toUtcIso } from "../utils/dates";
-import { optionalBoolean, optionalString, requiredString } from "../utils/validation";
+import { NodeCommandRunner } from "./command-runner";
+import { mapRepository } from "./repository-mapper";
+import { GitHubCommandApi } from "./command-api";
+import {
+  GraphqlCommitRef,
+  GraphqlCommitTarget,
+  isArray,
+  isAssociatedPullResponseArray,
+  isAuthenticatedUserResponse,
+  isBranchArray,
+  isDiffStatsResponse,
+  isGraphqlCommitResponse,
+} from "./response-schemas";
 
-const REST_API_VERSION = "2022-11-28";
+export { NodeCommandRunner } from "./command-runner";
+export { mapRepository } from "./repository-mapper";
+export { GitHubApiError } from "./api-error";
+
 const PAGE_SIZE = 100;
-const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
-
-interface GraphqlCommitResponse {
-  repository: {
-    ref: {
-      target: {
-        history: {
-          nodes: Array<{
-            oid: string;
-            message: string;
-            messageHeadline: string;
-            authoredDate: string;
-            committedDate: string | null;
-            url: string;
-            author: {
-              email: string | null;
-              user: { login: string | null } | null;
-            } | null;
-            parents: {
-              totalCount: number;
-              nodes: Array<{
-                author: {
-                  email: string | null;
-                  user: { login: string | null } | null;
-                } | null;
-              }>;
-            };
-          }>;
-          pageInfo: {
-            hasNextPage: boolean;
-            endCursor: string | null;
-          };
-        };
-      } | null;
-    } | null;
-  } | null;
-}
-
-type GraphqlCommitRef = NonNullable<NonNullable<GraphqlCommitResponse["repository"]>["ref"]>;
-type GraphqlCommitTarget = NonNullable<GraphqlCommitRef["target"]>;
-
-export class NodeCommandRunner implements CommandRunner {
-  public async run(
-    command: string,
-    args: string[],
-    options?: { input?: string },
-  ): Promise<GitHubRunnerResult> {
-    return await new Promise<GitHubRunnerResult>((resolve, reject) => {
-      const child = spawn(command, args, {
-        stdio: "pipe",
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
-      child.stderr.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
-      child.on("error", reject);
-      child.on("close", (code) => {
-        resolve({
-          stdout,
-          stderr,
-          exitCode: code ?? 1,
-        });
-      });
-
-      if (options?.input) {
-        child.stdin.write(options.input);
-      }
-      child.stdin.end();
-    });
-  }
-}
-
-export class GitHubApiError extends Error {
-  public constructor(
-    message: string,
-    public readonly errorType: string,
-    public readonly statusCode: number | undefined,
-    public readonly retryCount: number,
-  ) {
-    super(message);
-    this.name = "GitHubApiError";
-  }
-
-  public toFailure(repository: string, stage: string): FailureRecord {
-    return {
-      repository,
-      stage,
-      errorType: this.errorType,
-      statusCode: this.statusCode,
-      message: this.message,
-      retryCount: this.retryCount,
-    };
-  }
-}
 
 export class GitHubClient {
+  private readonly api: GitHubCommandApi;
+
   public constructor(
     private readonly config: NormalizedConfig,
-    private readonly logger: Logger,
-    private readonly runner: CommandRunner = new NodeCommandRunner(),
-  ) {}
+    logger: Logger,
+    runner: CommandRunner = new NodeCommandRunner(),
+  ) {
+    this.api = new GitHubCommandApi(config, logger, runner);
+  }
 
   public async validateGhInstallation(): Promise<void> {
-    await this.runGh(["--version"], "gh_not_installed");
+    await this.api.runGh(["--version"], "gh_not_installed");
   }
 
   public async validateAuthentication(): Promise<void> {
-    await this.runGh(["auth", "status"], "authentication_failed");
+    await this.api.runGh(["auth", "status"], "authentication_failed");
   }
 
   public async getAuthenticatedUser(): Promise<AuthenticatedUser> {
-    const response = await this.getJson<{ login: string; node_id: string }>(
+    const response = await this.api.getJson(
       ["/user"],
       "authentication_failed",
+      isAuthenticatedUserResponse,
     );
     return {
       login: response.login,
@@ -160,9 +75,10 @@ export class GitHubClient {
       };
     }
 
-    const response = await this.getJson<{ login: string; node_id: string }>(
+    const response = await this.api.getJson(
       [`/users/${requestedAuthor}`],
       "target_author_not_found",
+      isAuthenticatedUserResponse,
     );
 
     return {
@@ -185,9 +101,10 @@ export class GitHubClient {
         page: String(page),
       });
 
-      const batch = await this.getJson<unknown[]>(
+      const batch = await this.api.getJson(
         [`/user/repos?${params.toString()}`],
         "repository_discovery_failed",
+        isArray,
       );
 
       if (!Array.isArray(batch) || batch.length === 0) {
@@ -218,9 +135,10 @@ export class GitHubClient {
         per_page: String(PAGE_SIZE),
         page: String(page),
       });
-      const batch = await this.getJson<Array<{ name: string }>>(
+      const batch = await this.api.getJson(
         [`/repos/${repository.fullName}/branches?${params.toString()}`],
         "branch_listing_failed",
+        isBranchArray,
       );
 
       if (!Array.isArray(batch) || batch.length === 0) {
@@ -289,10 +207,11 @@ export class GitHubClient {
     repository: RepositoryRecord,
     sha: string,
   ): Promise<CommitDiffStats> {
-    const response = await this.getJson<{
-      stats?: { additions?: number; deletions?: number };
-      files?: unknown[];
-    }>([`/repos/${repository.fullName}/commits/${sha}`], "diff_stats_failed");
+    const response = await this.api.getJson(
+      [`/repos/${repository.fullName}/commits/${sha}`],
+      "diff_stats_failed",
+      isDiffStatsResponse,
+    );
 
     return {
       additions: response.stats?.additions ?? 0,
@@ -305,17 +224,14 @@ export class GitHubClient {
     repository: RepositoryRecord,
     sha: string,
   ): Promise<AssociatedPullRequest[]> {
-    const response = await this.getJson<
-      Array<{
-        number?: number;
-        html_url?: string;
-        title?: string;
-        state?: string;
-      }>
-    >([`/repos/${repository.fullName}/commits/${sha}/pulls`], "associated_pulls_failed");
+    const response = await this.api.getJson(
+      [`/repos/${repository.fullName}/commits/${sha}/pulls`],
+      "associated_pulls_failed",
+      isAssociatedPullResponseArray,
+    );
 
     return mapGraphqlAssociatedPulls(
-      (Array.isArray(response) ? response : []).map((pull) => ({
+      response.map((pull) => ({
         number: pull.number,
         url: pull.html_url,
         title: pull.title,
@@ -335,7 +251,7 @@ export class GitHubClient {
     let missingRef = false;
 
     while (true) {
-      const response: GraphqlCommitResponse = await this.postGraphql<GraphqlCommitResponse>(
+      const response = await this.api.postGraphql(
         buildCommitHistoryQuery(),
         {
           owner: repository.ownerLogin,
@@ -347,6 +263,7 @@ export class GitHubClient {
           after,
         },
         "commit_scan_failed",
+        isGraphqlCommitResponse,
       );
 
       const ref: GraphqlCommitRef | null = response.repository?.ref ?? null;
@@ -386,111 +303,6 @@ export class GitHubClient {
     return { observations, missingRef };
   }
 
-  private async getJson<T>(pathArgs: string[], errorType: string): Promise<T> {
-    const result = await this.runGh(
-      [
-        "api",
-        "--method",
-        "GET",
-        "-H",
-        "Accept: application/vnd.github+json",
-        "-H",
-        `X-GitHub-Api-Version: ${REST_API_VERSION}`,
-        ...pathArgs,
-      ],
-      errorType,
-    );
-
-    return parseJson<T>(result.stdout, errorType);
-  }
-
-  private async postGraphql<T>(
-    query: string,
-    variables: Record<string, unknown>,
-    errorType: string,
-  ): Promise<T> {
-    const payload = JSON.stringify({ query, variables });
-    const result = await this.runGh(
-      [
-        "api",
-        "graphql",
-        "--method",
-        "POST",
-        "--input",
-        "-",
-        "-H",
-        "Accept: application/vnd.github+json",
-        "-H",
-        `X-GitHub-Api-Version: ${REST_API_VERSION}`,
-      ],
-      errorType,
-      payload,
-    );
-    const parsed = parseJson<{ data?: T; errors?: Array<{ message: string }> }>(
-      result.stdout,
-      errorType,
-    );
-
-    if (parsed.errors?.length) {
-      const firstError = parsed.errors[0];
-      throw new GitHubApiError(
-        firstError?.message ?? "GitHub GraphQL request failed.",
-        errorType,
-        undefined,
-        0,
-      );
-    }
-
-    if (!parsed.data) {
-      throw new GitHubApiError("GitHub GraphQL response was missing data.", errorType, undefined, 0);
-    }
-
-    return parsed.data;
-  }
-
-  private async runGh(
-    args: string[],
-    errorType: string,
-    input?: string,
-  ): Promise<GitHubRunnerResult> {
-    for (let attempt = 0; attempt <= this.config.retryPolicy.maxRetries; attempt += 1) {
-      this.logger.debug(`Running gh ${args.join(" ")}`);
-      const result = await this.runner.run("gh", args, { input });
-
-      if (result.exitCode === 0) {
-        return result;
-      }
-
-      const statusCode = parseStatusCode(result.stderr);
-      const shouldRetry =
-        attempt < this.config.retryPolicy.maxRetries &&
-        (statusCode !== undefined
-          ? RETRYABLE_STATUS_CODES.has(statusCode)
-          : /timed out|timeout|temporary|connection reset/i.test(result.stderr));
-
-      if (!shouldRetry) {
-        throw new GitHubApiError(
-          cleanErrorMessage(result.stderr),
-          errorType,
-          statusCode,
-          attempt,
-        );
-      }
-
-      const resetTime = parseRateLimitReset(result.stderr);
-      const waitMs =
-        resetTime !== undefined
-          ? Math.max(resetTime * 1000 - Date.now(), 0)
-          : this.config.retryPolicy.backoffMs[attempt] ?? 0;
-
-      this.logger.debug(
-        `Retrying gh request after ${waitMs}ms because of ${cleanErrorMessage(result.stderr)}`,
-      );
-      await sleep(waitMs);
-    }
-
-    throw new GitHubApiError("GitHub request failed after retries.", errorType, undefined, this.config.retryPolicy.maxRetries);
-  }
 }
 
 function buildCommitHistoryQuery(): string {
@@ -602,67 +414,4 @@ function isTargetAuthor(
   }
 
   return Boolean(author.email && target.emails.includes(author.email));
-}
-
-export function mapRepository(value: unknown): RepositoryRecord {
-  if (!value || typeof value !== "object") {
-    throw new Error("Expected repository payload to be an object.");
-  }
-
-  const record = value as Record<string, unknown>;
-  const context = "repository payload";
-
-  const fullName = requiredString(record.full_name, "full_name", context);
-  const name = requiredString(record.name, "name", context);
-  const owner = record.owner;
-  const ownerLogin =
-    (owner && typeof owner === "object"
-      ? optionalString((owner as Record<string, unknown>).login, "owner.login", context)
-      : undefined) ?? fullName.split("/")[0] ?? "";
-
-  return {
-    fullName,
-    ownerLogin,
-    name,
-    visibility: optionalString(record.visibility, "visibility", context) ?? "unknown",
-    defaultBranch: optionalString(record.default_branch, "default_branch", context) ?? null,
-    isArchived: Boolean(optionalBoolean(record.archived, "archived", context)),
-    isFork: Boolean(optionalBoolean(record.fork, "fork", context)),
-    isDisabled: Boolean(optionalBoolean(record.disabled, "disabled", context)),
-    isPrivate: Boolean(optionalBoolean(record.private, "private", context)),
-    htmlUrl: optionalString(record.html_url, "html_url", context) ?? `https://github.com/${fullName}`,
-  };
-}
-
-function parseJson<T>(value: string, errorType: string): T {
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    throw new GitHubApiError(
-      `Failed to parse JSON for ${errorType}.`,
-      errorType,
-      undefined,
-      0,
-    );
-  }
-}
-
-function parseStatusCode(stderr: string): number | undefined {
-  const match = stderr.match(/\b(?:HTTP\s+)?(4\d{2}|5\d{2})\b/);
-  return match ? Number(match[1]) : undefined;
-}
-
-function parseRateLimitReset(stderr: string): number | undefined {
-  const match = stderr.match(/x-ratelimit-reset:\s*(\d+)/i);
-  return match ? Number(match[1]) : undefined;
-}
-
-function cleanErrorMessage(stderr: string): string {
-  return stderr.trim() || "GitHub command failed.";
-}
-
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
 }

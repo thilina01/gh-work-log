@@ -84,13 +84,23 @@ Useful development commands:
 npm run lint
 npm run typecheck
 npm test
+npm run test:coverage
 npm run build
 npm run visualize -- --input ./tmp/report.json --output ./tmp/report.html
 ```
 
+TypeScript checks use strict mode, exact optional-property semantics, and explicit
+return paths. GitHub API responses and imported JSON reports are validated at
+their boundaries; preserve that validation and cover invalid-input and failure
+paths as well as successful behavior when adding integrations.
+The coverage command enforces minimums of 75% lines/statements, 70% branches,
+and 80% functions for application source. Generated browser-client code, CLI
+entrypoints, and type-only modules are excluded. The current measured baseline
+is 90.87% lines, 76.05% branches, and 93.78% functions.
+
 Local defaults:
 
-- If `.gh-work-log.local.json` exists in the repo root, it is loaded automatically
+- If `.gh-work-log.local.json` exists in the current working directory, it is loaded automatically
 - This file is ignored by git and is meant for personal defaults such as excluded orgs, excluded repos, email aliases, and branch patterns
 - CLI flags still take precedence for single-value fields such as `--author`
 - For repeatable list filters such as `--exclude-org` and `--exclude-repo`, values from the local file and the CLI are combined, then normalized and deduplicated
@@ -345,6 +355,9 @@ Branch handling:
 - Default-branch scanning is always the baseline path
 - Feature branches are scanned only when `--scan-feature-branches` is enabled
 - Matching branches are determined by the configured branch patterns
+- Default- and matching feature-branch commit requests share a global concurrency limit of five
+- Branch results and failures retain deterministic order regardless of request completion order
+- API requests retry up to three times for rate limiting, selected transient HTTP errors, and transient connection/time-out failures, using the configured backoff
 
 Attribution:
 
@@ -384,6 +397,7 @@ REST endpoints:
 - `GET /user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=full_name&direction=asc&per_page=100&page=N`
 - `GET /repos/{owner}/{repo}/branches?per_page=100&page=N`
 - `GET /repos/{owner}/{repo}/commits/{sha}` when diff stats are enabled
+- `GET /repos/{owner}/{repo}/commits/{sha}/pulls` when `--enrich-prs` is enabled
 
 GraphQL:
 
@@ -391,6 +405,11 @@ GraphQL:
 - Each history node includes `parents(first: 2) { totalCount nodes { author { email user { login } } } }`, used to detect merge commits and whether the merged-in branch was authored by someone else
 
 The GraphQL history query is run once for the target GitHub user id and once more for configured email aliases when email matching is enabled. Results are unioned client-side and then range-filtered again by authored date to preserve the inclusive/exclusive contract.
+
+API responses are checked against the fields used by the application before
+being mapped into internal records. A malformed response is reported as an
+explicit discovery or scan error rather than being silently accepted or
+defaulted.
 
 ## JSON Output
 
@@ -400,6 +419,11 @@ Every report includes these top-level sections:
 - `statistics`
 - `failures`
 - `data`
+
+The visualizer accepts report schema version `1.2.0` and validates the report's
+required metadata, statistics, failures, and commit fields before rendering.
+Malformed JSON, unsupported schema versions, and incorrectly typed fields
+produce an explicit error. Optional report enrichments remain optional.
 
 High-level metadata includes:
 
@@ -501,6 +525,7 @@ Dashboard UX features:
 - theme selection persisted in browser `localStorage`
 - client-side tab switching, sorting, and filtering
 - fully standalone HTML with no server dependency
+- dashboard filtering and sorting are covered by browser-DOM tests
 
 ## Development Notes
 
@@ -508,7 +533,11 @@ Project entry points:
 
 - CLI entry: [src/cli.ts](src/cli.ts)
 - Scan orchestration: [src/app.ts](src/app.ts)
-- GitHub transport: [src/github/client.ts](src/github/client.ts)
+- Repository scan behavior: [src/app/scan-repository.ts](src/app/scan-repository.ts)
+- GitHub API workflow: [src/github/client.ts](src/github/client.ts)
+- GitHub command execution, retries, and response validation: [src/github/command-api.ts](src/github/command-api.ts) and [src/github/response-schemas.ts](src/github/response-schemas.ts)
+- Subprocess runner and repository mapping: [src/github/command-runner.ts](src/github/command-runner.ts) and [src/github/repository-mapper.ts](src/github/repository-mapper.ts)
+- Imported report validation: [src/report-validation.ts](src/report-validation.ts)
 - HTML visualizer entry: [src/visualize.ts](src/visualize.ts)
 - HTML renderer: [src/visualizer/render.ts](src/visualizer/render.ts)
 - Dashboard client-side script (typed source): [src/visualizer/browser-client.ts](src/visualizer/browser-client.ts) — compiled via `npm run generate:browser-client`; the compiled `browser-client.js` is committed and inlined into the generated HTML by `src/visualizer/browser-script.ts`
@@ -516,13 +545,16 @@ Project entry points:
 Test coverage:
 
 - unit tests for config normalization, aggregation, pattern matching, and HTML rendering
-- integration tests for the app flow with a mocked GitHub client
+- API-client tests for response validation, pagination, retries, and mapping
+- browser-DOM tests for dashboard filtering and sorting
+- integration tests for app behavior and globally bounded branch concurrency with a mocked GitHub client
+- `npm run test:coverage` reports coverage and enforces the configured thresholds
 
 Repository quality gates:
 
 - ESLint for static linting
-- Vitest for unit and integration tests
-- GitHub Actions CI running `typecheck`, `lint`, `test`, and `build`
+- TypeScript checks for application and browser-client code, including strict optional-property and return-path checks
+- GitHub Actions CI verifies the generated browser client, then runs typecheck, lint, coverage-enforced tests, and build
 
 ## Notes And Constraints
 

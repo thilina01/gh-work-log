@@ -4,6 +4,8 @@
     "module": "none",
     "lib": ["ES2022", "DOM"],
     "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
     "alwaysStrict": false,
     "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true,
