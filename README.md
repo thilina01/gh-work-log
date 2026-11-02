@@ -116,11 +116,13 @@ node dist/cli.js \
   --output ./tmp/report.json
 ```
 
-`--output` is optional. When omitted, the JSON path defaults to `tmp/report-<since>-<until>.json` (dates formatted as `YYYYMMDD`, `until` shown as the last included day):
+`--output` is optional. When omitted, the JSON path defaults to `tmp/report-<since>-<until>.json`, or `tmp/report-<author>-<since>-<until>.json` when `--author` is specified. Dates are formatted as `YYYYMMDD`, with `until` shown as the last included day:
 
 ```bash
 node dist/cli.js --since 2026-08-01 --until 2026-08-31
 # writes tmp/report-20260801-20260831.json
+node dist/cli.js --since 2026-08-01 --until 2026-08-31 --author alice
+# writes tmp/report-alice-20260801-20260831.json
 ```
 
 Feature-branch scan example:
@@ -187,7 +189,7 @@ Required flags:
 
 Output:
 
-- `--output`: JSON output path; defaults to `tmp/report-<since>-<until>.json` when omitted
+- `--output`: JSON output path; defaults to `tmp/report-<since>-<until>.json`, or `tmp/report-<author>-<since>-<until>.json` when targeting another author
 - `--config`: load local defaults from a JSON file (defaults to `.gh-work-log.local.json` in the current working directory)
 
 Identity:

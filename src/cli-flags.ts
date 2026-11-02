@@ -67,7 +67,7 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     kind: "single",
     cliKey: "output",
     helpSection: "Output",
-    helpText: `Output JSON path (default: ${DEFAULT_OUTPUT_DIR}/report-<since>-<until>.json)`,
+    helpText: `Output JSON path (default: ${DEFAULT_OUTPUT_DIR}/report[-<author>]-<since>-<until>.json)`,
   },
   {
     flag: "--config",

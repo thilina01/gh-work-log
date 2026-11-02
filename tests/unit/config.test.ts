@@ -279,6 +279,37 @@ describe("config parsing", () => {
     )).toBe(true);
   });
 
+  it("includes the requested author in the default output path", () => {
+    const alice = normalizeConfig(
+      parseCliArgs([
+        "--since",
+        "2026-08-01",
+        "--until",
+        "2026-08-31",
+        "--author",
+        "Alice",
+      ]),
+    );
+    const bob = normalizeConfig(
+      parseCliArgs([
+        "--since",
+        "2026-08-01",
+        "--until",
+        "2026-08-31",
+        "--author",
+        "bob",
+      ]),
+    );
+
+    expect(alice.outputPath.endsWith(
+      path.join("tmp", "report-alice-20260801-20260831.json"),
+    )).toBe(true);
+    expect(bob.outputPath.endsWith(
+      path.join("tmp", "report-bob-20260801-20260831.json"),
+    )).toBe(true);
+    expect(alice.outputPath).not.toBe(bob.outputPath);
+  });
+
   it("still honors an explicit --output path", () => {
     const config = normalizeConfig(
       parseCliArgs([

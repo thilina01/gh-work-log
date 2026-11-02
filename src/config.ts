@@ -255,7 +255,9 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     until,
     sinceIso: since.toISOString(),
     untilIso: until.toISOString(),
-    outputPath: path.resolve(options.output ?? defaultOutputPath(since, until)),
+    outputPath: path.resolve(
+      options.output ?? defaultOutputPath(since, until, requestedAuthor),
+    ),
     ...(requestedAuthor ? { requestedAuthor } : {}),
     emails: normalizeList(options.emails),
     includeOrgs: normalizeList(options.includeOrgs),
@@ -323,11 +325,21 @@ export function renderHelp(): string {
   return lines.join("\n");
 }
 
-function defaultOutputPath(since: Date, until: Date): string {
+function defaultOutputPath(
+  since: Date,
+  until: Date,
+  requestedAuthor?: string,
+): string {
   const sinceKey = formatUtcDateKey(since);
   const lastIncludedDay = new Date(until.getTime() - 1);
   const untilKey = formatUtcDateKey(lastIncludedDay);
-  return path.join(DEFAULT_OUTPUT_DIR, `report-${sinceKey}-${untilKey}.json`);
+  const authorPart = requestedAuthor
+    ? `-${requestedAuthor.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`
+    : "";
+  return path.join(
+    DEFAULT_OUTPUT_DIR,
+    `report${authorPart}-${sinceKey}-${untilKey}.json`,
+  );
 }
 
 function formatUtcDateKey(date: Date): string {
