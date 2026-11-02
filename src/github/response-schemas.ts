@@ -14,14 +14,15 @@ export interface GraphqlCommitResponse {
             changedFiles?: number;
             url: string;
             author: {
-              email: string | null;
+              name?: string | null;
+              email?: string | null;
               user: { login: string | null } | null;
             } | null;
             parents: {
               totalCount: number;
               nodes: Array<{
                 author: {
-                  email: string | null;
+                  email?: string | null;
                   user: { login: string | null } | null;
                 } | null;
               }>;
@@ -182,7 +183,11 @@ function isGraphqlAuthor(value: unknown): boolean {
   if (value === null) {
     return true;
   }
-  if (!isRecord(value) || !isNullableString(value.email)) {
+  if (
+    !isRecord(value) ||
+    (value.name !== undefined && !isNullableString(value.name)) ||
+    (value.email !== undefined && !isNullableString(value.email))
+  ) {
     return false;
   }
   return (

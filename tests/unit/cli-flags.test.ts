@@ -18,6 +18,7 @@ const ALL_CLI_OPTION_KEYS: Record<keyof CliOptions, true> = {
   excludeRepos: true,
   branchPatterns: true,
   ownedOnly: true,
+  organizationReport: true,
   scanFeatureBranches: true,
   includeDiffStats: true,
   detectWip: true,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCommitRecords, buildRunResult } from "../../src/aggregation";
-import { NormalizedConfig, RepositoryRecord } from "../../src/types";
+import { CommitObservation, NormalizedConfig, RepositoryRecord } from "../../src/types";
 
 function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig {
   return {
@@ -16,6 +16,7 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     excludeRepos: [],
     branchPatterns: [],
     ownedOnly: false,
+    organizationReport: false,
     scanFeatureBranches: true,
     includeDiffStats: true,
     detectWip: true,
@@ -60,6 +61,7 @@ describe("aggregation", () => {
           url: "https://github.com/org/service/commit/abc",
           sourceMode: "default_branch",
           authorLogin: "alice",
+          authorName: "Alice Developer",
           authorEmail: "alice@example.com",
           parentCount: 1,
           mergeIncludesExternalAuthor: false,
@@ -111,6 +113,7 @@ describe("aggregation", () => {
     );
 
     expect(commits).toHaveLength(2);
+    expect(commits[0]).not.toHaveProperty("authorName");
     expect(commits[0]).toMatchObject({
       branch: "main",
       observedBranches: ["feature/work", "main"],
@@ -194,7 +197,7 @@ describe("aggregation", () => {
       endedAtMs: Date.parse("2026-04-05T10:00:02.500Z"),
     });
 
-    expect(result.metadata.schemaVersion).toBe("1.2.0");
+    expect(result.metadata.schemaVersion).toBe("1.4.0");
     expect(result.metadata.profile).toBe("operator");
     expect(result.metadata.enrichPrs).toBe(false);
     expect(result.metadata.ignoreLocalConfig).toBe(false);
@@ -260,6 +263,115 @@ describe("aggregation", () => {
       chore: 0,
       other: 1,
     });
+  });
+
+  it("aggregates unique organization commits by login and omits author emails", () => {
+    const repository: RepositoryRecord = {
+      fullName: "org/service",
+      ownerLogin: "org",
+      name: "service",
+      visibility: "private",
+      defaultBranch: "main",
+      isArchived: false,
+      isFork: false,
+      isDisabled: false,
+      isPrivate: true,
+      htmlUrl: "https://github.com/org/service",
+    };
+    const observations: CommitObservation[] = [
+      {
+        repository: "org/service",
+        defaultBranch: "main",
+        scanBranch: "main",
+        sha: "same",
+        message: "one",
+        messageHeadline: "one",
+        authoredDateTime: "2026-03-02T10:00:00.000Z",
+        committedDateTime: null,
+        url: "https://github.com/org/service/commit/same",
+        sourceMode: "default_branch",
+        authorLogin: "alice",
+        authorEmail: "alice-private@example.com",
+        parentCount: 1,
+        mergeIncludesExternalAuthor: false,
+        mergeBranchAuthorLogin: "bob-private@example.com",
+        additions: 4,
+        deletions: 1,
+        filesChanged: 1,
+      },
+      {
+        repository: "org/service",
+        defaultBranch: "main",
+        scanBranch: "feature/duplicate",
+        sha: "same",
+        message: "one",
+        messageHeadline: "one",
+        authoredDateTime: "2026-03-02T10:00:00.000Z",
+        committedDateTime: null,
+        url: "https://github.com/org/service/commit/same",
+        sourceMode: "feature_branch",
+        authorLogin: "alice",
+        authorEmail: "alice-private@example.com",
+        parentCount: 1,
+        mergeIncludesExternalAuthor: false,
+        mergeBranchAuthorLogin: null,
+      },
+      {
+        repository: "org/service",
+        defaultBranch: "main",
+        scanBranch: "main",
+        sha: "unknown",
+        message: "two",
+        messageHeadline: "two",
+        authoredDateTime: "2026-03-03T10:00:00.000Z",
+        committedDateTime: null,
+        url: "https://github.com/org/service/commit/unknown",
+        sourceMode: "default_branch",
+        authorLogin: null,
+        authorName: "release-bot[bot] <unknown-private@example.com>",
+        authorEmail: "unknown-private@example.com",
+        parentCount: 1,
+        mergeIncludesExternalAuthor: false,
+        mergeBranchAuthorLogin: null,
+        additions: 2,
+        deletions: 0,
+        filesChanged: 1,
+      },
+    ];
+
+    const result = buildRunResult({
+      config: makeConfig({
+        organizationReport: true,
+        includeOrgs: ["org"],
+        includeDiffStats: true,
+      }),
+      authenticatedUser: "reporter",
+      targetAuthor: "reporter",
+      repositoriesDiscovered: 1,
+      repositoriesIncluded: 1,
+      scannedRepositoryCount: 1,
+      observations,
+      repositoryMap: new Map([[repository.fullName, repository]]),
+      skippedRepositories: [],
+      failures: [],
+      startedAtMs: 1,
+      endedAtMs: 2,
+    });
+
+    expect(result.metadata).toMatchObject({
+      schemaVersion: "1.4.0",
+      reportMode: "organization",
+      targetAuthor: "All contributors",
+    });
+    expect(result.statistics.contributors).toEqual([
+      { login: "alice", commitCount: 1, repositoryCount: 1, additions: 4, deletions: 1 },
+      { login: null, commitCount: 1, repositoryCount: 1, additions: 2, deletions: 0 },
+    ]);
+    expect(result.data).toHaveLength(2);
+    expect(result.data[1]).toHaveProperty("authorName", null);
+    expect(result.data.every((commit) => commit.authorEmail === null)).toBe(true);
+    expect(result.data.every((commit) => commit.mergeBranchAuthorLogin === null)).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("private@example.com");
   });
 
   it("collapses filter skips for management and agent profiles", () => {

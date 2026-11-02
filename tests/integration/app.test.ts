@@ -16,6 +16,7 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     excludeRepos: [],
     branchPatterns: [],
     ownedOnly: false,
+    organizationReport: false,
     scanFeatureBranches: true,
     includeDiffStats: true,
     detectWip: true,
@@ -255,6 +256,85 @@ describe("runApp", () => {
     });
   });
 
+  it("reports all observed contributors for explicitly included organizations", async () => {
+    const first = makeRepository("org/first");
+    const second = makeRepository("org/second");
+    const excluded = makeRepository("outside/repo");
+    const client = new FakeGitHubClient(
+      [first, second, excluded],
+      {
+        "org/first": [
+          {
+            branch: "main",
+            commits: [
+              {
+                ...makeObservation(
+                  first,
+                  "main",
+                  "alice-commit",
+                  "feat: alice work",
+                  "2026-03-02T10:00:00.000Z",
+                ),
+                authorLogin: "alice",
+                authorEmail: "alice-private@example.com",
+              },
+              {
+                ...makeObservation(
+                  first,
+                  "main",
+                  "unknown-commit",
+                  "fix: unattributed",
+                  "2026-03-03T10:00:00.000Z",
+                ),
+                authorLogin: null,
+                authorEmail: "unknown-private@example.com",
+              },
+            ],
+          },
+        ],
+        "org/second": [
+          {
+            branch: "main",
+            commits: [
+              {
+                ...makeObservation(
+                  second,
+                  "main",
+                  "bob-commit",
+                  "docs: bob work",
+                  "2026-03-04T10:00:00.000Z",
+                ),
+                authorLogin: "bob",
+                authorEmail: "bob-private@example.com",
+              },
+            ],
+          },
+        ],
+      },
+    );
+
+    const result = await runApp(
+      makeConfig({
+        organizationReport: true,
+        includeOrgs: ["org"],
+        scanFeatureBranches: false,
+        includeDiffStats: false,
+      }),
+      { client, writeJson: async () => {} },
+    );
+
+    expect(result.metadata.reportMode).toBe("organization");
+    expect(result.metadata.targetAuthor).toBe("All contributors");
+    expect(result.statistics.summary.uniqueCommits).toBe(3);
+    expect(result.statistics.contributors).toEqual([
+      { login: "alice", commitCount: 1, repositoryCount: 1 },
+      { login: "bob", commitCount: 1, repositoryCount: 1 },
+      { login: null, commitCount: 1, repositoryCount: 1 },
+    ]);
+    expect(result.data.map((commit) => commit.repository)).not.toContain("outside/repo");
+    expect(JSON.stringify(result)).not.toContain("@example.com");
+  });
+
   it("uses diff stats returned with commit history without making enrichment requests", async () => {
     const repository = makeRepository("alice/project-a");
     const client = new FakeGitHubClient(
@@ -324,7 +404,7 @@ describe("runApp", () => {
       repositoriesDiscovered: 2,
       repositoriesIncluded: 2,
     });
-    expect(result.metadata.schemaVersion).toBe("1.2.0");
+    expect(result.metadata.schemaVersion).toBe("1.4.0");
     expect(result.metadata.profile).toBe("operator");
     expect(result.metadata.tool.name).toBe("gh-work-log");
     expect(result.metadata.ignoreLocalConfig).toBe(false);

@@ -162,12 +162,17 @@ export class GitHubClient {
     target: TargetIdentity;
   }): Promise<{ observations: CommitObservation[]; missingRef: boolean }> {
     const observations = new Map<string, CommitObservation>();
-    const queries = [
-      params.target.id ? { id: params.target.id } : null,
-      params.target.emails.length > 0 ? { emails: params.target.emails } : null,
-    ].filter(Boolean) as Array<{ id?: string; emails?: string[] }>;
+    const queries: Array<{ id?: string; emails?: string[] } | null> =
+      this.config.organizationReport
+        ? [null]
+        : [
+            ...(params.target.id ? [{ id: params.target.id }] : []),
+            ...(params.target.emails.length > 0
+              ? [{ emails: params.target.emails }]
+              : []),
+          ];
 
-    if (queries.length === 0) {
+    if (!this.config.organizationReport && queries.length === 0) {
       queries.push({ id: params.target.id });
     }
 
@@ -243,7 +248,7 @@ export class GitHubClient {
   private async fetchCommitHistory(
     repository: RepositoryRecord,
     branch: string,
-    author: { id?: string; emails?: string[] },
+    author: { id?: string; emails?: string[] } | null,
     target: TargetIdentity,
   ): Promise<{ observations: CommitObservation[]; missingRef: boolean }> {
     const observations: CommitObservation[] = [];
@@ -252,7 +257,10 @@ export class GitHubClient {
 
     while (true) {
       const response = await this.api.postGraphql(
-        buildCommitHistoryQuery(this.config.includeDiffStats),
+        buildCommitHistoryQuery(
+          this.config.includeDiffStats,
+          this.config.organizationReport,
+        ),
         {
           owner: repository.ownerLogin,
           name: repository.name,
@@ -295,7 +303,12 @@ export class GitHubClient {
           url: node.url,
           sourceMode: branch === repository.defaultBranch ? "default_branch" : "feature_branch",
           authorLogin: node.author?.user?.login ?? null,
-          authorEmail: node.author?.email ?? null,
+          ...(this.config.organizationReport
+            ? { authorName: node.author?.name ?? null }
+            : {}),
+          authorEmail: this.config.organizationReport
+            ? null
+            : node.author?.email ?? null,
           parentCount: node.parents.totalCount,
           mergeIncludesExternalAuthor: detectExternalMergeAuthor(node.parents, target),
           mergeBranchAuthorLogin: resolveMergeBranchAuthorLogin(node.parents),
@@ -314,7 +327,10 @@ export class GitHubClient {
 
 }
 
-function buildCommitHistoryQuery(includeDiffStats: boolean): string {
+function buildCommitHistoryQuery(
+  includeDiffStats: boolean,
+  organizationReport: boolean,
+): string {
   return `
     query CommitHistory(
       $owner: String!
@@ -346,7 +362,8 @@ function buildCommitHistoryQuery(includeDiffStats: boolean): string {
                   ${includeDiffStats ? "additions\n                  deletions\n                  changedFiles" : ""}
                   url
                   author {
-                    email
+                    ${organizationReport ? "name" : ""}
+                    ${organizationReport ? "" : "email"}
                     user {
                       login
                     }
@@ -355,7 +372,7 @@ function buildCommitHistoryQuery(includeDiffStats: boolean): string {
                     totalCount
                     nodes {
                       author {
-                        email
+                        ${organizationReport ? "" : "email"}
                         user {
                           login
                         }
@@ -379,7 +396,7 @@ function buildCommitHistoryQuery(includeDiffStats: boolean): string {
 type MergeParents = {
   totalCount: number;
   nodes: Array<{
-    author: { email: string | null; user: { login: string | null } | null } | null;
+    author: { email?: string | null; user: { login: string | null } | null } | null;
   }>;
 };
 
@@ -403,7 +420,7 @@ export function resolveMergeBranchAuthorLogin(parents: MergeParents): string | n
 
 function getMergedBranchAuthor(
   parents: MergeParents,
-): { email: string | null; user: { login: string | null } | null } | null {
+): { email?: string | null; user: { login: string | null } | null } | null {
   if (parents.totalCount <= 1) {
     return null;
   }
@@ -412,7 +429,7 @@ function getMergedBranchAuthor(
 }
 
 function isTargetAuthor(
-  author: { email: string | null; user: { login: string | null } | null } | null,
+  author: { email?: string | null; user: { login: string | null } | null } | null,
   target: TargetIdentity,
 ): boolean {
   if (!author) {

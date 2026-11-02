@@ -1,6 +1,7 @@
 export type ScanMode = "default_branch" | "default_and_feature_branches";
 export type SourceMode = "default_branch" | "feature_branch";
 export type ReportProfile = "operator" | "management" | "agent";
+export type ReportMode = "author" | "organization";
 export type SkipCategory = "filter" | "operational";
 export type MessageCategory =
   | "feat"
@@ -24,6 +25,7 @@ export interface CliOptions {
   excludeRepos: string[];
   branchPatterns: string[];
   ownedOnly: boolean;
+  organizationReport: boolean;
   scanFeatureBranches: boolean;
   includeDiffStats: boolean;
   detectWip: boolean;
@@ -90,6 +92,7 @@ export interface NormalizedConfig {
   verbose: boolean;
   dryRun: boolean;
   profile: ReportProfile;
+  organizationReport: boolean;
   concurrency: number;
   retryPolicy: RetryPolicy;
 }
@@ -199,6 +202,7 @@ export interface CommitObservation extends Partial<CommitDiffStats> {
   url: string;
   sourceMode: SourceMode;
   authorLogin: string | null;
+  authorName?: string | null;
   authorEmail: string | null;
   parentCount: number;
   mergeIncludesExternalAuthor: boolean;
@@ -217,6 +221,7 @@ export interface CommitRecord extends Partial<CommitDiffStats> {
   url: string;
   sourceMode: SourceMode;
   authorLogin: string | null;
+  authorName?: string | null;
   authorEmail: string | null;
   isWip: boolean;
   wipReason?: string;
@@ -299,6 +304,7 @@ export interface Statistics {
   skippedRepositories: SkippedRepository[];
   highlights: ReportHighlights;
   perRepository: RepositorySummary[];
+  contributors?: ContributorSummary[];
   timeSeries: TimeSeriesSummary;
   codeLevel?: CodeLevelSummary;
   messageCategories?: MessageCategorySummary;
@@ -306,8 +312,17 @@ export interface Statistics {
   hints?: ReportHints;
 }
 
+export interface ContributorSummary {
+  login: string | null;
+  commitCount: number;
+  repositoryCount: number;
+  additions?: number;
+  deletions?: number;
+}
+
 export interface RunMetadata {
-  schemaVersion: "1.2.0";
+  schemaVersion: "1.2.0" | "1.3.0" | "1.4.0";
+  reportMode?: ReportMode;
   generatedAt: string;
   authenticatedUser: string;
   targetAuthor: string;

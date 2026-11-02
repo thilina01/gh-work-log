@@ -133,6 +133,13 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     helpText: "Keep only repositories owned by the authenticated user",
   },
   {
+    flag: "--organization-report",
+    kind: "boolean",
+    cliKey: "organizationReport",
+    helpSection: "Repository filters",
+    helpText: "Report active contributors across explicitly included organizations",
+  },
+  {
     flag: "--ignore-local-config",
     kind: "boolean",
     cliKey: "ignoreLocalConfig",

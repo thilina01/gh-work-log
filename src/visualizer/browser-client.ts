@@ -13,6 +13,7 @@ interface DashboardCommitRow {
   isMergeCommit: boolean;
   mergeIncludesExternalAuthor: boolean;
   authorLogin: string | null;
+  authorName?: string | null;
   authorEmail: string | null;
   mergeBranchAuthorLogin: string | null;
 }
@@ -24,9 +25,18 @@ interface DashboardRepoRow {
   lastCommitAt: string;
 }
 
+interface DashboardContributorRow {
+  login: string | null;
+  commitCount: number;
+  repositoryCount: number;
+  additions?: number;
+  deletions?: number;
+}
+
 interface DashboardData {
   commits: DashboardCommitRow[];
   perRepository?: DashboardRepoRow[];
+  contributors?: DashboardContributorRow[];
   summary?: {
     uniqueCommits: number;
     repositoriesWithCommits: number;
@@ -37,6 +47,7 @@ interface DashboardData {
     until: string;
     targetAuthor: string;
     authenticatedUser: string;
+    reportMode?: "author" | "organization";
   };
   highlights?: {
     topRepositories?: Array<{ repository: string; commitCount: number }>;
@@ -55,6 +66,11 @@ type SortDirection = "asc" | "desc";
 interface SortState {
   key: string;
   direction: SortDirection;
+}
+
+interface ResolvedAuthor {
+  value: string;
+  source: "account" | "commit-name" | "unknown";
 }
 
 function requireElement<T extends Element>(id: string): T {
@@ -129,19 +145,46 @@ function formatRepoName(repo: string): string {
   return `<span class="repo-org">${escapeBrowserHtml(org)}</span><span class="repo-name">${escapeBrowserHtml(name)}</span>`;
 }
 
-function resolveAuthorLabel(row: DashboardCommitRow): string | null {
+function resolveAuthor(row: DashboardCommitRow): ResolvedAuthor {
   if (row.isMergeCommit && row.mergeBranchAuthorLogin) {
-    return row.mergeBranchAuthorLogin;
+    return { value: row.mergeBranchAuthorLogin, source: "account" };
   }
 
-  return row.authorLogin || row.authorEmail || null;
+  if (row.authorLogin) {
+    return { value: row.authorLogin, source: "account" };
+  }
+  if (row.authorEmail) {
+    return { value: row.authorEmail, source: "account" };
+  }
+  const authorName = row.authorName?.trim();
+  return authorName
+    ? { value: authorName, source: "commit-name" }
+    : { value: "Unknown", source: "unknown" };
+}
+
+function resolveAuthorLabel(row: DashboardCommitRow): string {
+  return resolveAuthor(row).value;
+}
+
+function authorFilterKey(author: ResolvedAuthor): string {
+  return `${author.source}:${author.value}`;
+}
+
+function formatAuthorExportValue(row: DashboardCommitRow): string {
+  const author = resolveAuthor(row);
+  return author.source === "commit-name"
+    ? `${author.value} (unverified commit name)`
+    : author.value;
 }
 
 const repositories = Array.from(new Set(rows.map((row) => row.repository))).sort();
 const branches = Array.from(new Set(rows.map((row) => row.branch))).sort();
 const authors = Array.from(
-  new Set(rows.map((row) => resolveAuthorLabel(row)).filter((value): value is string => Boolean(value))),
-).sort();
+  new Map(rows.map((row) => {
+    const author = resolveAuthor(row);
+    return [authorFilterKey(author), author] as const;
+  })).entries(),
+).sort((left, right) => left[1].value.localeCompare(right[1].value));
 
 for (const repo of repositories) {
   const option = document.createElement("option");
@@ -157,10 +200,13 @@ for (const branch of branches) {
   branchFilter.appendChild(option);
 }
 
-for (const author of authors) {
+for (const [key, author] of authors) {
   const option = document.createElement("option");
-  option.value = author;
-  option.textContent = author;
+  option.value = key;
+  option.textContent =
+    author.source === "commit-name"
+      ? `${author.value} (unverified commit name)`
+      : author.value;
   authorFilter.appendChild(option);
 }
 
@@ -179,7 +225,7 @@ const exportColumns: ExportColumn[] = [
   { key: "message", header: "Message", getValue: (row) => row.message },
   { key: "wip", header: "WIP", getValue: (row) => (row.isWip ? "WIP" : "No") },
   { key: "merge", header: "Merge", getValue: (row) => (row.isMergeCommit ? "Merge" : "No") },
-  { key: "mergeAuthor", header: "Author", getValue: (row) => resolveAuthorLabel(row) ?? "" },
+  { key: "mergeAuthor", header: "Author", getValue: formatAuthorExportValue },
 ];
 
 let lastFilteredRows: DashboardCommitRow[] = [];
@@ -232,7 +278,13 @@ function escapeBrowserHtml(value: string): string {
 function compareRows(left: DashboardCommitRow, right: DashboardCommitRow): number {
   let result = 0;
 
-  if (sortState.key === "repository") {
+  if (sortState.key === "author") {
+    result =
+      resolveAuthorLabel(left).localeCompare(resolveAuthorLabel(right)) ||
+      left.authoredDateTime.localeCompare(right.authoredDateTime) ||
+      left.repository.localeCompare(right.repository) ||
+      left.sha.localeCompare(right.sha);
+  } else if (sortState.key === "repository") {
     result =
       left.repository.localeCompare(right.repository) ||
       left.authoredDateTime.localeCompare(right.authoredDateTime) ||
@@ -290,7 +342,7 @@ function renderRows(): void {
     if (branchValue && row.branch !== branchValue) {
       return false;
     }
-    if (authorValue && resolveAuthorLabel(row) !== authorValue) {
+    if (authorValue && authorFilterKey(resolveAuthor(row)) !== authorValue) {
       return false;
     }
     if (wipValue && String(row.isWip) !== wipValue) {
@@ -312,6 +364,7 @@ function renderRows(): void {
       row.scanBranch,
       row.sha,
       row.message,
+      resolveAuthorLabel(row),
     ].join(" ").toLowerCase();
     return haystack.includes(query);
   }).sort(compareRows);
@@ -327,10 +380,10 @@ function renderRows(): void {
     const mergeBadge = row.isMergeCommit
       ? '<span class="chip" style="border-color: rgba(18,116,117,.18); color: #127475;">Merge</span>'
       : '<span class="chip">No</span>';
-    const authorLabel = resolveAuthorLabel(row);
-    const mergeAuthorBadge = authorLabel
-      ? '<span class="chip"' + (row.mergeIncludesExternalAuthor ? ' style="border-color: rgba(214,108,6,.25); color: #d96c06;"' : '') + '>' + escapeBrowserHtml(authorLabel) + '</span>'
-      : '<span class="chip">&mdash;</span>';
+    const author = resolveAuthor(row);
+    const mergeAuthorBadge = author.source === "commit-name"
+      ? '<span class="chip" title="Unverified name from Git commit metadata">' + escapeBrowserHtml(author.value) + '</span><span class="chip">Unverified</span>'
+      : '<span class="chip"' + (row.mergeIncludesExternalAuthor ? ' style="border-color: rgba(214,108,6,.25); color: #d96c06;"' : '') + '>' + escapeBrowserHtml(author.value) + '</span>';
 
     const lines = row.message.trim().split("\n");
     const subject = lines[0] ?? "";
@@ -363,7 +416,7 @@ function renderRows(): void {
               '<div class="commit-detail-meta">' +
                 '<span class="commit-detail-sha"><code>' + escapeBrowserHtml(shortSha) + '</code></span>' +
                 '<span class="commit-detail-branch">' + escapeBrowserHtml(branchLabel) + '</span>' +
-                (authorLabel ? '<span class="chip">' + escapeBrowserHtml(authorLabel) + '</span>' : '') +
+                mergeAuthorBadge +
                 (row.isWip ? '<span class="chip" style="border-color: rgba(171,35,70,.18); color: #ab2346;">WIP</span>' : '') +
                 (row.isMergeCommit ? '<span class="chip" style="border-color: rgba(18,116,117,.18); color: #127475;">Merge</span>' : '') +
               '</div>' +
@@ -510,6 +563,7 @@ tableBody.addEventListener("click", (event) => {
 const tabToHash: Record<string, string> = {
   "overview-panel": "overview",
   "activity-panel": "activity",
+  "contributors-panel": "contributors",
   "repositories-panel": "repositories",
   "issues-panel": "issues",
   "commits-panel": "commits",
@@ -518,6 +572,7 @@ const tabToHash: Record<string, string> = {
 const hashToTab: Record<string, string> = {
   overview: "overview-panel",
   activity: "activity-panel",
+  contributors: "contributors-panel",
   repositories: "repositories-panel",
   issues: "issues-panel",
   commits: "commits-panel",
@@ -665,6 +720,87 @@ const repoSortState: RepoSortState = {
 };
 
 const repoRows = (DASHBOARD_DATA.perRepository || []).slice();
+const contributorRows = (DASHBOARD_DATA.contributors || []).slice();
+const contributorSearch = document.getElementById("contributor-search") as HTMLInputElement | null;
+const contributorTableBody = document.getElementById("contributor-table-body");
+const contributorSortHeaders = Array.from(
+  document.querySelectorAll<HTMLElement>("[data-contributor-sort-key]"),
+);
+const contributorSortState: SortState = {
+  key: "commitCount",
+  direction: "desc",
+};
+
+function renderContributorSummary(): void {
+  if (!contributorTableBody) {
+    return;
+  }
+
+  const query = contributorSearch?.value.trim().toLowerCase() || "";
+  const filtered = contributorRows.filter((contributor) =>
+    !query || (contributor.login ?? "unknown").toLowerCase().includes(query),
+  );
+
+  filtered.sort((left, right) => {
+    if (contributorSortState.key === "login") {
+      if (left.login === null || right.login === null) {
+        return left.login === right.login ? 0 : left.login === null ? 1 : -1;
+      }
+      const result = left.login.localeCompare(right.login);
+      return contributorSortState.direction === "asc" ? result : -result;
+    }
+
+    const key = contributorSortState.key as "commitCount" | "repositoryCount" | "additions" | "deletions";
+    const result = (left[key] ?? 0) - (right[key] ?? 0);
+    return contributorSortState.direction === "asc" ? result : -result;
+  });
+
+  const includeDiffStats = contributorRows.some(
+    (contributor) => contributor.additions !== undefined,
+  );
+  contributorTableBody.innerHTML = filtered.map((contributor) =>
+    `<tr>
+      <td>${escapeBrowserHtml(contributor.login ?? "Unknown")}</td>
+      <td>${contributor.commitCount.toLocaleString()}</td>
+      <td>${contributor.repositoryCount.toLocaleString()}</td>
+      ${includeDiffStats ? `<td>${(contributor.additions ?? 0).toLocaleString()}</td><td>${(contributor.deletions ?? 0).toLocaleString()}</td>` : ""}
+    </tr>`,
+  ).join("");
+
+  for (const header of contributorSortHeaders) {
+    const indicator = header.querySelector<HTMLElement>("[data-contributor-sort-indicator]");
+    if (indicator) {
+      const key = header.getAttribute("data-contributor-sort-key");
+      indicator.textContent =
+        key === contributorSortState.key
+          ? contributorSortState.direction === "asc"
+            ? "▲"
+            : "▼"
+          : "";
+    }
+  }
+}
+
+if (contributorSearch) {
+  contributorSearch.addEventListener("input", renderContributorSummary);
+}
+
+for (const header of contributorSortHeaders) {
+  header.addEventListener("click", () => {
+    const key = header.getAttribute("data-contributor-sort-key");
+    if (!key) {
+      return;
+    }
+    if (contributorSortState.key === key) {
+      contributorSortState.direction =
+        contributorSortState.direction === "asc" ? "desc" : "asc";
+    } else {
+      contributorSortState.key = key;
+      contributorSortState.direction = key === "login" ? "asc" : "desc";
+    }
+    renderContributorSummary();
+  });
+}
 
 function renderRepoSummary(): void {
   if (!repoSummaryTbody) {
@@ -754,7 +890,7 @@ if (copySummaryButton) {
 
     const text = [
       `### GitHub Work Log Summary (${formatShortDate(meta.since).slice(0, 10)} to ${formatShortDate(meta.until).slice(0, 10)})`,
-      `**Target Author**: ${meta.targetAuthor} | **Authenticated User**: ${meta.authenticatedUser}`,
+      `**${meta.reportMode === "organization" ? "Report scope" : "Target Author"}**: ${meta.reportMode === "organization" ? "All observed contributors" : meta.targetAuthor} | **Authenticated User**: ${meta.authenticatedUser}`,
       `**Total Commits**: ${summary.uniqueCommits.toLocaleString()} unique across ${summary.repositoriesWithCommits} repositories (${summary.durationSeconds}s scan)`,
       "",
       "**Top Repositories**:",
@@ -849,6 +985,7 @@ loadHeroPreference();
 loadColumnPreferences();
 renderRows();
 renderRepoSummary();
+renderContributorSummary();
 
 const initialHash = window.location.hash.replace(/^#/, "");
 if (initialHash && hashToTab[initialHash]) {

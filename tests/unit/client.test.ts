@@ -29,6 +29,7 @@ function makeConfig(): NormalizedConfig {
     excludeRepos: [],
     branchPatterns: [],
     ownedOnly: false,
+    organizationReport: false,
     scanFeatureBranches: false,
     includeDiffStats: false,
     detectWip: false,
@@ -241,6 +242,87 @@ describe("GitHub API response validation", () => {
     expect(graphqlInput).toContain("additions");
     expect(graphqlInput).toContain("deletions");
     expect(graphqlInput).toContain("changedFiles");
+    const request = JSON.parse(graphqlInput) as { query: string };
+    expect(request.query).not.toMatch(/author\s*\{\s*name/);
+    expect(result.observations[0]).not.toHaveProperty("authorName");
+  });
+
+  it("scans every author once and omits emails in organization mode", async () => {
+    let graphqlInput = "";
+    const client = new GitHubClient(
+      { ...makeConfig(), organizationReport: true },
+      new Logger(false),
+      {
+        async run(_command, _args, options) {
+          graphqlInput = options?.input ?? "";
+          return {
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  ref: {
+                    target: {
+                      history: {
+                        nodes: [
+                          {
+                            oid: "abc",
+                            message: "feat: all authors",
+                            messageHeadline: "feat: all authors",
+                            authoredDate: "2026-03-02T10:00:00Z",
+                            committedDate: null,
+                            url: "https://github.com/org/service/commit/abc",
+                            author: {
+                              name: "release-bot[bot]",
+                              user: { login: "bob" },
+                            },
+                            parents: { totalCount: 1, nodes: [{ author: null }] },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                      },
+                    },
+                  },
+                },
+              },
+            }),
+            stderr: "",
+            exitCode: 0,
+          };
+        },
+      },
+    );
+
+    const result = await client.listBranchCommits({
+      repository: {
+        fullName: "org/service",
+        ownerLogin: "org",
+        name: "service",
+        visibility: "private",
+        defaultBranch: "main",
+        isArchived: false,
+        isFork: false,
+        isDisabled: false,
+        isPrivate: true,
+        htmlUrl: "https://github.com/org/service",
+      },
+      branch: "main",
+      target,
+    });
+
+    const request = JSON.parse(graphqlInput) as {
+      query: string;
+      variables: { author: unknown };
+    };
+    expect(request.variables.author).toBeNull();
+    expect(request.query).not.toMatch(/\bemail\b/);
+    expect(request.query).toMatch(/author\s*\{\s*name\s+user\s*\{/);
+    expect(result.observations).toMatchObject([
+      {
+        sha: "abc",
+        authorLogin: "bob",
+        authorName: "release-bot[bot]",
+        authorEmail: null,
+      },
+    ]);
   });
 
   it("omits an absent HTTP status from failure records", () => {

@@ -1,6 +1,7 @@
 import {
   CommitObservation,
   CommitRecord,
+  ContributorSummary,
   FailureRecord,
   MessageCategorySummary,
   NormalizedConfig,
@@ -55,10 +56,13 @@ export function buildRunResult(params: {
 
   return {
     metadata: {
-      schemaVersion: "1.2.0",
+      schemaVersion: "1.4.0",
+      reportMode: params.config.organizationReport ? "organization" : "author",
       generatedAt: new Date(params.endedAtMs).toISOString(),
       authenticatedUser: params.authenticatedUser,
-      targetAuthor: params.targetAuthor,
+      targetAuthor: params.config.organizationReport
+        ? "All contributors"
+        : params.targetAuthor,
       since: params.config.sinceIso,
       until: params.config.untilIso,
       scanMode: params.config.scanFeatureBranches
@@ -122,14 +126,19 @@ export function buildCommitRecords(
       url: first.url,
       sourceMode: observedOnDefault ? "default_branch" : "feature_branch",
       authorLogin: first.authorLogin,
-      authorEmail: first.authorEmail,
+      ...(config.organizationReport
+        ? { authorName: sanitizeCommitAuthorName(first.authorName) }
+        : {}),
+      authorEmail: config.organizationReport ? null : first.authorEmail,
       isWip:
         config.detectWip &&
         canonicalBranch !== repository.defaultBranch &&
         !observedOnDefault,
       isMergeCommit: first.parentCount > 1,
       mergeIncludesExternalAuthor: first.mergeIncludesExternalAuthor,
-      mergeBranchAuthorLogin: first.mergeBranchAuthorLogin,
+      mergeBranchAuthorLogin: config.organizationReport
+        ? null
+        : first.mergeBranchAuthorLogin,
     };
 
     if (config.scanFeatureBranches) {
@@ -168,6 +177,13 @@ export function buildCommitRecords(
   return commits.sort(compareCommitRecords);
 }
 
+function sanitizeCommitAuthorName(value: string | null | undefined): string | null {
+  if (!value || /[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+/.test(value)) {
+    return null;
+  }
+  return value;
+}
+
 function buildStatistics(params: {
   config: NormalizedConfig;
   commits: CommitRecord[];
@@ -195,6 +211,9 @@ function buildStatistics(params: {
     categorizedSkips,
     params.config.profile,
   );
+  const contributors = params.config.organizationReport
+    ? buildContributorSummary(params.commits, params.config.includeDiffStats)
+    : undefined;
 
   let codeLevel: Statistics["codeLevel"];
   if (params.config.includeDiffStats) {
@@ -259,6 +278,7 @@ function buildStatistics(params: {
       ...(codeLevel ? { codeLevel } : {}),
     }),
     perRepository,
+    ...(contributors ? { contributors } : {}),
     timeSeries,
   };
 
@@ -426,6 +446,56 @@ function buildPerRepositorySummary(
       featureBranchScanEnabled,
     }))
     .sort((left, right) => left.repository.localeCompare(right.repository));
+}
+
+function buildContributorSummary(
+  commits: CommitRecord[],
+  includeDiffStats: boolean,
+): ContributorSummary[] {
+  const summaries = new Map<
+    string | null,
+    { repositories: Set<string>; commitCount: number; additions: number; deletions: number }
+  >();
+
+  for (const commit of commits) {
+    const login = commit.authorLogin;
+    let summary = summaries.get(login);
+    if (!summary) {
+      summary = {
+        repositories: new Set<string>(),
+        commitCount: 0,
+        additions: 0,
+        deletions: 0,
+      };
+      summaries.set(login, summary);
+    }
+
+    summary.commitCount += 1;
+    summary.repositories.add(commit.repository);
+    if (includeDiffStats) {
+      summary.additions += commit.additions ?? 0;
+      summary.deletions += commit.deletions ?? 0;
+    }
+  }
+
+  return Array.from(summaries, ([login, summary]) => ({
+    login,
+    commitCount: summary.commitCount,
+    repositoryCount: summary.repositories.size,
+    ...(includeDiffStats
+      ? { additions: summary.additions, deletions: summary.deletions }
+      : {}),
+  })).sort(
+    (left, right) =>
+      right.commitCount - left.commitCount ||
+      (left.login === null
+        ? right.login === null
+          ? 0
+          : 1
+        : right.login === null
+          ? -1
+          : left.login.localeCompare(right.login)),
+  );
 }
 
 function buildTimeSeries(commits: CommitRecord[]): TimeSeriesSummary {

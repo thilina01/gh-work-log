@@ -34,6 +34,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     excludeRepos: [],
     branchPatterns: [],
     ownedOnly: false,
+    organizationReport: false,
     scanFeatureBranches: false,
     includeDiffStats: false,
     detectWip: false,
@@ -217,6 +218,7 @@ export function buildEffectiveConfigSnapshot(params: {
       includeRepos: config.includeRepos,
       excludeRepos: config.excludeRepos,
       ownedOnly: config.ownedOnly,
+      organizationReport: config.organizationReport,
       scanFeatureBranches: config.scanFeatureBranches,
       branchPatterns: config.branchPatterns.map((pattern) => pattern.input),
       includeDiffStats: config.includeDiffStats,
@@ -249,6 +251,16 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
   const until = parseUntil(options.until);
   assertSinceBeforeUntil(since, until);
   const requestedAuthor = options.author?.trim();
+  const includeOrgs = normalizeList(options.includeOrgs);
+
+  if (options.organizationReport && includeOrgs.length === 0) {
+    throw new Error(
+      "`--organization-report` requires at least one `--include-org`.",
+    );
+  }
+  if (options.organizationReport && requestedAuthor) {
+    throw new Error("`--organization-report` cannot be combined with `--author`.");
+  }
 
   return {
     since,
@@ -256,11 +268,17 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     sinceIso: since.toISOString(),
     untilIso: until.toISOString(),
     outputPath: path.resolve(
-      options.output ?? defaultOutputPath(since, until, requestedAuthor),
+      options.output ??
+        defaultOutputPath(
+          since,
+          until,
+          requestedAuthor,
+          options.organizationReport ? includeOrgs : [],
+        ),
     ),
     ...(requestedAuthor ? { requestedAuthor } : {}),
     emails: normalizeList(options.emails),
-    includeOrgs: normalizeList(options.includeOrgs),
+    includeOrgs,
     excludeOrgs: normalizeList(options.excludeOrgs),
     includeRepos: normalizeList(options.includeRepos),
     excludeRepos: normalizeList(options.excludeRepos),
@@ -275,6 +293,7 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     verbose: options.verbose,
     dryRun: options.dryRun,
     profile: parseReportProfile(options.profile),
+    organizationReport: options.organizationReport,
     concurrency: 5,
     retryPolicy: {
       maxRetries: 3,
@@ -329,16 +348,21 @@ function defaultOutputPath(
   since: Date,
   until: Date,
   requestedAuthor?: string,
+  includedOrgs: string[] = [],
 ): string {
   const sinceKey = formatUtcDateKey(since);
   const lastIncludedDay = new Date(until.getTime() - 1);
   const untilKey = formatUtcDateKey(lastIncludedDay);
-  const authorPart = requestedAuthor
+  const scopePart = includedOrgs.length > 0
+    ? `-org-${includedOrgs
+        .map((org) => org.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
+        .join("_")}`
+    : requestedAuthor
     ? `-${requestedAuthor.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`
     : "";
   return path.join(
     DEFAULT_OUTPUT_DIR,
-    `report${authorPart}-${sinceKey}-${untilKey}.json`,
+    `report${scopePart}-${sinceKey}-${untilKey}.json`,
   );
 }
 

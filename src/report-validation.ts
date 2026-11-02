@@ -18,7 +18,12 @@ export function parseRunResult(value: unknown): RunResult {
   const metadata = record(report.metadata, "metadata");
   const statistics = record(report.statistics, "statistics");
 
-  assertLiteral(metadata.schemaVersion, "1.2.0", "metadata.schemaVersion");
+  literal(metadata.schemaVersion, ["1.2.0", "1.3.0", "1.4.0"], "metadata.schemaVersion");
+  if (metadata.schemaVersion === "1.3.0" || metadata.schemaVersion === "1.4.0") {
+    literal(metadata.reportMode, ["author", "organization"], "metadata.reportMode");
+  } else if (metadata.reportMode !== undefined) {
+    literal(metadata.reportMode, ["author", "organization"], "metadata.reportMode");
+  }
   for (const key of [
     "generatedAt",
     "authenticatedUser",
@@ -87,6 +92,21 @@ export function parseRunResult(value: unknown): RunResult {
   validateHighlights(statistics.highlights);
   validateRepositories(statistics.perRepository);
   validateTimeSeries(statistics.timeSeries);
+  if (statistics.contributors !== undefined) {
+    validateContributors(statistics.contributors);
+  }
+  if (
+    metadata.reportMode === "organization" &&
+    statistics.contributors === undefined
+  ) {
+    throw new Error("Invalid report: expected statistics.contributors for organization report.");
+  }
+  if (
+    metadata.reportMode !== "organization" &&
+    statistics.contributors !== undefined
+  ) {
+    throw new Error("Invalid report: statistics.contributors is only valid for organization reports.");
+  }
   if (statistics.codeLevel !== undefined) {
     validateCodeLevel(statistics.codeLevel, "statistics.codeLevel");
   }
@@ -119,8 +139,15 @@ export function parseRunResult(value: unknown): RunResult {
       number(failure.statusCode, `failures[${index}].statusCode`);
     }
   }
+  const isOrganizationSchema14 =
+    metadata.schemaVersion === "1.4.0" && metadata.reportMode === "organization";
+  const isAuthorSchema14 =
+    metadata.schemaVersion === "1.4.0" && metadata.reportMode === "author";
   for (const [index, item] of array(report.data, "data").entries()) {
-    validateCommit(item, `data[${index}]`);
+    validateCommit(item, `data[${index}]`, {
+      requireAuthorName: isOrganizationSchema14,
+      forbidAuthorName: isAuthorSchema14,
+    });
   }
 
   return value as RunResult;
@@ -174,6 +201,21 @@ function validateRepositories(value: unknown): void {
   }
 }
 
+function validateContributors(value: unknown): void {
+  for (const [index, item] of array(value, "statistics.contributors").entries()) {
+    const path = `statistics.contributors[${index}]`;
+    const contributor = record(item, path);
+    nullableString(contributor.login, `${path}.login`);
+    number(contributor.commitCount, `${path}.commitCount`);
+    number(contributor.repositoryCount, `${path}.repositoryCount`);
+    for (const key of ["additions", "deletions"]) {
+      if (contributor[key] !== undefined) {
+        number(contributor[key], `${path}.${key}`);
+      }
+    }
+  }
+}
+
 function validateTimeSeries(value: unknown): void {
   const series = record(value, "statistics.timeSeries");
   for (const key of ["byDay", "byWeek", "byMonth"]) {
@@ -212,7 +254,11 @@ function validateMessageCategories(value: unknown, path: string): void {
   }
 }
 
-function validateCommit(value: unknown, path: string): void {
+function validateCommit(
+  value: unknown,
+  path: string,
+  options: { requireAuthorName: boolean; forbidAuthorName: boolean },
+): void {
   const commit = record(value, path);
   for (const key of [
     "repository",
@@ -227,6 +273,14 @@ function validateCommit(value: unknown, path: string): void {
   }
   for (const key of ["committedDateTime", "authorLogin", "authorEmail", "mergeBranchAuthorLogin"]) {
     nullableString(commit[key], `${path}.${key}`);
+  }
+  if (options.requireAuthorName) {
+    nullableString(commit.authorName, `${path}.authorName`);
+  } else if (commit.authorName !== undefined) {
+    if (options.forbidAuthorName) {
+      throw new Error(`Invalid report: ${path}.authorName is not valid for author reports.`);
+    }
+    nullableString(commit.authorName, `${path}.authorName`);
   }
   literal(commit.sourceMode, ["default_branch", "feature_branch"], `${path}.sourceMode`);
   for (const key of ["isWip", "isMergeCommit", "mergeIncludesExternalAuthor"]) {

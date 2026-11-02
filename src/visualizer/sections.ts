@@ -13,15 +13,16 @@ import {
 
 export function renderHero(report: RunResult): string {
   const summary = report.statistics.summary;
+  const isOrganizationReport = report.metadata.reportMode === "organization";
 
   return `<section class="hero">
         <div class="panel hero-main">
           <div class="eyebrow">GitHub Work Log</div>
-          <h1>${escapeHtml(report.metadata.targetAuthor)} across ${summary.repositoriesWithCommits} repositories</h1>
+          <h1>${isOrganizationReport ? "Organization activity" : `${escapeHtml(report.metadata.targetAuthor)} activity`} across ${summary.repositoriesWithCommits} repositories</h1>
           <p class="lede">
-            This report covers commits authored between <strong>${formatDate(report.metadata.since)}</strong> and
-            <strong>${formatDate(report.metadata.until)}</strong>. The dashboard below turns the exported JSON into
-            a readable activity snapshot: volume over time, most active repositories, recent commits, and anything skipped or failed.
+            This report covers ${isOrganizationReport ? "observed commit activity in the selected organizations" : "commits authored"} between
+            <strong>${formatDate(report.metadata.since)}</strong> and <strong>${formatDate(report.metadata.until)}</strong>.
+            ${isOrganizationReport ? "Contributor counts describe activity in this scan, not individual productivity." : "The dashboard summarizes volume over time, repositories, recent commits, and anything skipped or failed."}
           </p>
           <div class="meta-grid">
             <div class="meta-pill"><strong>Generated</strong><br />${formatDate(report.metadata.generatedAt)}</div>
@@ -53,6 +54,7 @@ export function renderMetricCards(report: RunResult): string {
   const discovery = report.statistics.discovery;
 
   return `<section class="cards">
+        ${report.metadata.reportMode === "organization" ? metricCard("Active Contributors", (report.statistics.contributors ?? []).filter((contributor) => contributor.login !== null).length, "Authors with a linked GitHub login in the scanned activity") : ""}
         ${metricCard("Repositories Discovered", discovery.repositoriesDiscovered, "Everything returned by discovery queries")}
         ${metricCard("Repositories Scanned", summary.repositoriesScanned, "After filter and metadata checks")}
         ${metricCard("Repositories With Commits", summary.repositoriesWithCommits, "Repos with at least one matching commit")}
@@ -64,13 +66,55 @@ export function renderMetricCards(report: RunResult): string {
       </section>`;
 }
 
-export function renderTabStrip(): string {
+export function renderTabStrip(organizationReport = false): string {
   return `<section class="tab-strip" aria-label="Report views">
         <button class="tab-button is-active" type="button" data-tab="overview-panel">Overview</button>
         <button class="tab-button" type="button" data-tab="activity-panel">Activity</button>
+        ${organizationReport ? '<button class="tab-button" type="button" data-tab="contributors-panel">Contributors</button>' : ""}
         <button class="tab-button" type="button" data-tab="repositories-panel">Repositories</button>
         <button class="tab-button" type="button" data-tab="issues-panel">Issues</button>
         <button class="tab-button" type="button" data-tab="commits-panel">All Commits</button>
+      </section>`;
+}
+
+export function renderContributorsTab(report: RunResult): string {
+  const contributors = report.statistics.contributors ?? [];
+  const withDiffStats = report.metadata.includeDiffStats;
+
+  return `<section id="contributors-panel" class="tab-panel">
+        <div class="panel section">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Active Contributors</h2>
+              <p class="section-copy">Unique commits observed in the selected organizations and date range. These activity counts are not a measure of individual productivity.</p>
+            </div>
+            <div class="chip">${formatNumber(contributors.filter((contributor) => contributor.login !== null).length)} linked accounts</div>
+          </div>
+          <div class="filter-row" style="margin-bottom: 12px;">
+            <input id="contributor-search" type="search" placeholder="Filter contributors..." aria-label="Filter contributors" style="max-width: 320px;" />
+          </div>
+          <div class="table-wrap">
+            <table id="contributor-table">
+              <thead>
+                <tr>
+                  <th class="sortable" data-contributor-sort-key="login">GitHub login <span data-contributor-sort-indicator="login"></span></th>
+                  <th class="sortable" data-contributor-sort-key="commitCount">Commits <span data-contributor-sort-indicator="commitCount">▼</span></th>
+                  <th class="sortable" data-contributor-sort-key="repositoryCount">Repositories <span data-contributor-sort-indicator="repositoryCount"></span></th>
+                  ${withDiffStats ? `<th class="sortable" data-contributor-sort-key="additions">Additions <span data-contributor-sort-indicator="additions"></span></th>
+                  <th class="sortable" data-contributor-sort-key="deletions">Deletions <span data-contributor-sort-indicator="deletions"></span></th>` : ""}
+                </tr>
+              </thead>
+              <tbody id="contributor-table-body">
+                ${contributors.map((contributor) => `<tr>
+                  <td>${escapeHtml(contributor.login ?? "Unknown")}</td>
+                  <td>${formatNumber(contributor.commitCount)}</td>
+                  <td>${formatNumber(contributor.repositoryCount)}</td>
+                  ${withDiffStats ? `<td>${formatNumber(contributor.additions ?? 0)}</td><td>${formatNumber(contributor.deletions ?? 0)}</td>` : ""}
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>`;
 }
 
@@ -102,6 +146,7 @@ export function renderOverviewTab(report: RunResult): string {
                   <tr><td>Repositories scanned</td><td>${formatNumber(summary.repositoriesScanned)}</td></tr>
                   <tr><td>Repositories with commits</td><td>${formatNumber(summary.repositoriesWithCommits)}</td></tr>
                   <tr><td>Unique commits</td><td>${formatNumber(summary.uniqueCommits)}</td></tr>
+                  ${report.metadata.reportMode === "organization" ? `<tr><td>Active contributors</td><td>${formatNumber((report.statistics.contributors ?? []).filter((contributor) => contributor.login !== null).length)}</td></tr>` : ""}
                   <tr><td>Skipped repositories</td><td>${formatNumber(summary.skippedRepositories)}</td></tr>
                   <tr><td>Filter skips</td><td>${formatNumber(skippedByCategory.filter)}</td></tr>
                   <tr><td>Operational skips</td><td>${formatNumber(skippedByCategory.operational)}</td></tr>
@@ -301,7 +346,9 @@ export function renderCommitsTab(report: RunResult): string {
                   <th data-column="message">Message</th>
                   <th data-column="wip">WIP</th>
                   <th data-column="merge">Merge</th>
-                  <th data-column="mergeAuthor">Author</th>
+                  <th data-column="mergeAuthor" class="sortable" data-sort-key="author">
+                    <span class="sortable-label">Author <span class="sort-indicator" data-sort-indicator="author"></span></span>
+                  </th>
                 </tr>
               </thead>
               <tbody id="commit-table-body"></tbody>

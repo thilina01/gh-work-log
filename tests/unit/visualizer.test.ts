@@ -204,6 +204,30 @@ describe("renderHtmlReport", () => {
     ).toThrow("Invalid report: expected data[0].isWip to be a boolean.");
   });
 
+  it("requires author names only in organization schema 1.4.0 reports", () => {
+    const organizationReport = makeReport();
+    organizationReport.metadata.schemaVersion = "1.4.0";
+    organizationReport.metadata.reportMode = "organization";
+    organizationReport.statistics.contributors = [];
+    organizationReport.data[0]!.authorName = null;
+    expect(parseReportJson(JSON.stringify(organizationReport))).toEqual(organizationReport);
+
+    const missingAuthorName = structuredClone(organizationReport);
+    delete missingAuthorName.data[0]!.authorName;
+    expect(() => parseReportJson(JSON.stringify(missingAuthorName))).toThrow(
+      "Invalid report: expected data[0].authorName to be a string.",
+    );
+
+    const authorReport = makeReport();
+    authorReport.metadata.schemaVersion = "1.4.0";
+    authorReport.metadata.reportMode = "author";
+    expect(parseReportJson(JSON.stringify(authorReport))).toEqual(authorReport);
+    authorReport.data[0]!.authorName = "should-not-be-present";
+    expect(() => parseReportJson(JSON.stringify(authorReport))).toThrow(
+      "Invalid report: data[0].authorName is not valid for author reports.",
+    );
+  });
+
   it("filters and sorts commits in the rendered dashboard", () => {
     const report = makeReport();
     const firstCommit = report.data[0]!;
@@ -239,6 +263,147 @@ describe("renderHtmlReport", () => {
       new MouseEvent("click", { bubbles: true }),
     );
     expect(tableBody.querySelector("tr.commit-row")?.textContent).toContain("abc12345");
+    dom.window.close();
+  });
+
+  it("renders a searchable organization contributor table without author emails", () => {
+    const report = makeReport();
+    report.metadata.schemaVersion = "1.3.0";
+    report.metadata.reportMode = "organization";
+    report.metadata.targetAuthor = "All contributors";
+    report.metadata.includeDiffStats = false;
+    report.data[0]!.authorEmail = null;
+    report.statistics.contributors = [
+      { login: "alice", commitCount: 3, repositoryCount: 2 },
+      { login: "bob", commitCount: 1, repositoryCount: 1 },
+      { login: null, commitCount: 1, repositoryCount: 1 },
+    ];
+
+    expect(parseReportJson(JSON.stringify(report))).toEqual(report);
+    const dom = new JSDOM(renderHtmlReport(report), {
+      runScripts: "dangerously",
+      url: "https://report.example/",
+    });
+
+    const { document, Event, MouseEvent } = dom.window;
+    const contributorBody = document.getElementById("contributor-table-body")!;
+    const search = document.getElementById("contributor-search") as HTMLInputElement;
+
+    expect(document.querySelector('[data-tab="contributors-panel"]')).not.toBeNull();
+    expect(contributorBody.querySelectorAll("tr")).toHaveLength(3);
+    search.value = "bob";
+    search.dispatchEvent(new Event("input"));
+    expect(contributorBody.querySelectorAll("tr")).toHaveLength(1);
+    expect(contributorBody.textContent).toContain("bob");
+
+    search.value = "";
+    search.dispatchEvent(new Event("input"));
+    document
+      .querySelector<HTMLElement>('[data-contributor-sort-key="login"]')!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(contributorBody.querySelector("tr")?.textContent).toContain("alice");
+    const html = renderHtmlReport(report);
+    expect(html).toContain("not a measure of individual productivity");
+    expect(html).not.toContain("thilina@example.com");
+    dom.window.close();
+  });
+
+  it("labels unlinked author names as unverified across the commit table and CSV", async () => {
+    const report = makeReport();
+    report.metadata.schemaVersion = "1.4.0";
+    report.metadata.reportMode = "organization";
+    report.metadata.targetAuthor = "All contributors";
+    report.data[0]!.authorLogin = null;
+    report.data[0]!.authorEmail = null;
+    report.data[0]!.authorName = "otr-release-bot[bot]";
+    report.data.push({
+      ...report.data[0]!,
+      sha: "def123456",
+      authorName: "<img src=x onerror=alert(1)>",
+      message: "chore: update",
+    });
+    report.data.push({
+      ...report.data[0]!,
+      sha: "ghi123456",
+      authorName: null,
+      message: "chore: unknown",
+    });
+    report.statistics.contributors = [
+      { login: null, commitCount: 3, repositoryCount: 1 },
+    ];
+
+    expect(parseReportJson(JSON.stringify(report))).toEqual(report);
+    const html = renderHtmlReport(report);
+    expect(html).toContain('"authorName":"otr-release-bot[bot]"');
+    let resolveExportedCsv: (csv: string) => void = () => {};
+    const exportedCsvPromise = new Promise<string>((resolve) => {
+      resolveExportedCsv = resolve;
+    });
+    const dom = new JSDOM(html, {
+      runScripts: "dangerously",
+      url: "https://report.example/",
+      beforeParse(window) {
+        Object.defineProperty(window.URL, "createObjectURL", {
+          value: (blob: Blob) => {
+            const reader = new window.FileReader();
+            reader.addEventListener("load", () => {
+              resolveExportedCsv(String(reader.result));
+            });
+            reader.readAsText(blob);
+            return "blob:test";
+          },
+        });
+        Object.defineProperty(window.URL, "revokeObjectURL", { value: () => {} });
+        window.HTMLAnchorElement.prototype.click = () => {};
+      },
+    });
+    const { document, Event, MouseEvent } = dom.window;
+    const authorFilter = document.getElementById("author-filter") as HTMLSelectElement;
+    const columnToggle = document.querySelector<HTMLInputElement>(
+      '[data-column-toggle="mergeAuthor"]',
+    )!;
+    columnToggle.checked = true;
+    columnToggle.dispatchEvent(new Event("change"));
+
+    const authorCells = () =>
+      Array.from(document.querySelectorAll<HTMLElement>(
+        '#commit-table-body [data-column="mergeAuthor"]',
+      ));
+    const botCell = authorCells().find((cell) =>
+      cell.textContent?.includes("otr-release-bot[bot]"),
+    );
+    const fallbackCell = authorCells().find((cell) =>
+      cell.textContent?.includes("<img src=x onerror=alert(1)>"),
+    );
+    const unknownCell = authorCells().find((cell) => cell.textContent?.includes("Unknown"));
+    expect(botCell?.textContent).toContain("Unverified");
+    expect(fallbackCell?.querySelector("img")).toBeNull();
+    expect(unknownCell).toBeDefined();
+
+    authorFilter.value = "commit-name:otr-release-bot[bot]";
+    authorFilter.dispatchEvent(new Event("change"));
+    expect(document.querySelectorAll("tr.commit-row")).toHaveLength(1);
+    expect(authorCells()[0]?.textContent).toContain("Unverified");
+    authorFilter.value = "";
+    authorFilter.dispatchEvent(new Event("change"));
+
+    document.querySelector<HTMLElement>('[data-sort-key="author"]')!.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const sortedNames = authorCells().map((cell) =>
+      cell.textContent?.replace("Unverified", "").trim(),
+    );
+    const ascendingNames = [...sortedNames].sort((left, right) =>
+      (left ?? "").localeCompare(right ?? ""),
+    );
+    expect(sortedNames).toEqual(ascendingNames.reverse());
+
+    const exportButton = document.getElementById("export-csv-button") as HTMLButtonElement;
+    expect(exportButton.disabled).toBe(false);
+    exportButton.dispatchEvent(new MouseEvent("click"));
+    const exportedCsv = await exportedCsvPromise;
+    expect(exportedCsv).toContain("otr-release-bot[bot] (unverified commit name)");
+    expect(exportedCsv).toContain("Unknown");
     dom.window.close();
   });
 

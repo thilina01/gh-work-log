@@ -57,7 +57,11 @@ export async function runApp(
     authenticatedUser,
     config.emails,
   );
-  logger.info(`Resolved target author ${targetIdentity.login}`);
+  if (config.organizationReport) {
+    logger.info(`Collecting commits for all authors in ${config.includeOrgs.join(", ")}`);
+  } else {
+    logger.info(`Resolved target author ${targetIdentity.login}`);
+  }
 
   logger.info("Discovering repositories");
   const discoveredRepositories = await client.listRepositories();
@@ -78,7 +82,9 @@ export async function runApp(
     const result = buildRunResult({
       config,
       authenticatedUser: authenticatedUser.login,
-      targetAuthor: targetIdentity.login,
+      targetAuthor: config.organizationReport
+        ? "All contributors"
+        : targetIdentity.login,
       repositoriesDiscovered: discoveredRepositories.length,
       repositoriesIncluded: filtered.passedFilters.length,
       scannedRepositoryCount: 0,
@@ -182,7 +188,9 @@ export async function runApp(
   const result = buildRunResult({
     config,
     authenticatedUser: authenticatedUser.login,
-    targetAuthor: targetIdentity.login,
+    targetAuthor: config.organizationReport
+      ? "All contributors"
+      : targetIdentity.login,
     repositoriesDiscovered: discoveredRepositories.length,
     repositoriesIncluded: filtered.passedFilters.length,
     scannedRepositoryCount: filtered.scannable.length,

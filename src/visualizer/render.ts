@@ -3,6 +3,7 @@ import { renderBrowserScript } from "./browser-script";
 import {
   renderActivityTab,
   renderCommitsTab,
+  renderContributorsTab,
   renderHero,
   renderIssuesTab,
   renderMetricCards,
@@ -21,6 +22,7 @@ export function renderHtmlReport(report: RunResult): string {
     highlights: report.statistics.highlights,
     timeSeries: report.statistics.timeSeries,
     perRepository: report.statistics.perRepository,
+    contributors: report.statistics.contributors,
     failures: report.failures,
     skippedRepositories: report.statistics.skippedRepositories,
     commits: report.data,
@@ -53,16 +55,17 @@ ${VISUALIZER_STYLES}
       </div>
       <div id="hero-compact-bar" class="panel hero-compact-bar" style="display: none;">
         <div class="hero-compact-content">
-          <strong>${report.metadata.targetAuthor}</strong> &bull;
+          <strong>${report.metadata.reportMode === "organization" ? "All contributors" : report.metadata.targetAuthor}</strong> &bull;
           <span>${report.statistics.summary.uniqueCommits} commits</span> &bull;
           <span>${report.statistics.summary.repositoriesWithCommits} repositories</span> &bull;
           <span>${report.metadata.since.slice(0, 10)} to ${report.metadata.until.slice(0, 10)}</span>
         </div>
         <button id="hero-expand-btn" class="topbar-btn" type="button">Expand Header &#9660;</button>
       </div>
-      ${renderTabStrip()}
+      ${renderTabStrip(report.metadata.reportMode === "organization")}
       ${renderOverviewTab(report)}
       ${renderActivityTab(report)}
+      ${report.metadata.reportMode === "organization" ? renderContributorsTab(report) : ""}
       ${renderRepositoriesTab(report)}
       ${renderIssuesTab(report)}
       ${renderCommitsTab(report)}

@@ -310,6 +310,52 @@ describe("config parsing", () => {
     expect(alice.outputPath).not.toBe(bob.outputPath);
   });
 
+  it("requires an included organization and rejects an author in organization-report mode", () => {
+    expect(() =>
+      normalizeConfig(
+        parseCliArgs([
+          "--since",
+          "2026-03-01",
+          "--until",
+          "2026-04-01",
+          "--organization-report",
+        ]),
+      ),
+    ).toThrow("`--organization-report` requires at least one `--include-org`.");
+
+    expect(() =>
+      normalizeConfig(
+        parseCliArgs([
+          "--since",
+          "2026-03-01",
+          "--until",
+          "2026-04-01",
+          "--organization-report",
+          "--include-org",
+          "org",
+          "--author",
+          "alice",
+        ]),
+      ),
+    ).toThrow("`--organization-report` cannot be combined with `--author`.");
+
+    const config = normalizeConfig(
+      parseCliArgs([
+        "--since",
+        "2026-03-01",
+        "--until",
+        "2026-04-01",
+        "--organization-report",
+        "--include-org",
+        "Acme",
+        "--include-org",
+        "Other Org",
+      ]),
+    );
+    expect(config.organizationReport).toBe(true);
+    expect(config.outputPath).toContain("report-org-acme_other-org-");
+  });
+
   it("still honors an explicit --output path", () => {
     const config = normalizeConfig(
       parseCliArgs([
