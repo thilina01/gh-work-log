@@ -142,6 +142,8 @@ export function renderRepositoriesTab(report: RunResult): string {
     .sort((left, right) => right.commitCount - left.commitCount || left.repository.localeCompare(right.repository))
     .slice(0, 12);
 
+  const maxCommits = Math.max(...report.statistics.perRepository.map((r) => r.commitCount), 1);
+
   return `<section id="repositories-panel" class="tab-panel">
         <div class="stack stack--wide">
           <div class="panel section">
@@ -164,25 +166,47 @@ export function renderRepositoriesTab(report: RunResult): string {
                 <p class="section-copy">Per-repository rollups with first and last observed authored timestamps.</p>
               </div>
             </div>
+            <div class="filter-row" style="margin-bottom: 12px;">
+              <input id="repo-summary-search" type="search" placeholder="Filter repositories..." style="max-width: 320px;" />
+            </div>
             <div class="table-wrap">
-              <table>
+              <table id="repo-summary-table">
                 <thead>
                   <tr>
-                    <th>Repository</th>
-                    <th>Commits</th>
-                    <th>First</th>
-                    <th>Last</th>
+                    <th class="sortable" data-repo-sort-key="repository">
+                      <span class="sortable-label">Repository <span class="sort-indicator" data-repo-sort-indicator="repository"></span></span>
+                    </th>
+                    <th class="sortable" data-repo-sort-key="commitCount">
+                      <span class="sortable-label">Commits <span class="sort-indicator" data-repo-sort-indicator="commitCount">▼</span></span>
+                    </th>
+                    <th class="sortable" data-repo-sort-key="firstCommitAt">
+                      <span class="sortable-label">First <span class="sort-indicator" data-repo-sort-indicator="firstCommitAt"></span></span>
+                    </th>
+                    <th class="sortable" data-repo-sort-key="lastCommitAt">
+                      <span class="sortable-label">Last <span class="sort-indicator" data-repo-sort-indicator="lastCommitAt"></span></span>
+                    </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="repo-summary-tbody">
                   ${report.statistics.perRepository
                     .map(
-                      (repo) => `<tr>
-                        <td>${escapeHtml(repo.repository)}</td>
-                        <td>${formatNumber(repo.commitCount)}</td>
+                      (repo) => {
+                        const width = Math.max((repo.commitCount / maxCommits) * 100, 2);
+                        return `<tr data-repo-name="${escapeHtml(repo.repository.toLowerCase())}">
+                        <td>
+                          <a href="#commits" class="drilldown-link" data-drilldown-repo="${escapeHtml(repo.repository)}" title="Filter commits for ${escapeHtml(repo.repository)}">${escapeHtml(repo.repository)}</a>
+                          <a href="https://github.com/${escapeHtml(repo.repository)}" target="_blank" rel="noreferrer noopener" class="external-repo-link" title="Open repository on GitHub">&nearr;</a>
+                        </td>
+                        <td>
+                          <div class="repo-volume-cell">
+                            <span class="repo-volume-num">${formatNumber(repo.commitCount)}</span>
+                            <div class="bar-track repo-volume-track"><div class="bar-fill" style="width: ${width}%;"></div></div>
+                          </div>
+                        </td>
                         <td>${formatDate(repo.firstCommitAt)}</td>
                         <td>${formatDate(repo.lastCommitAt)}</td>
-                      </tr>`,
+                      </tr>`;
+                      },
                     )
                     .join("")}
                 </tbody>
@@ -312,7 +336,11 @@ function renderRepoBars(
       const width = Math.max((repo.commitCount / max) * 100, 3);
       return `<div class="bar-row">
         <div>
-          <div class="bar-label"><strong>${escapeHtml(repo.repository)}</strong><br />${formatDate(repo.firstCommitAt)} to ${formatDate(repo.lastCommitAt)}</div>
+          <div class="bar-label">
+            <a href="#commits" class="drilldown-link" data-drilldown-repo="${escapeHtml(repo.repository)}" title="Filter commits for ${escapeHtml(repo.repository)}"><strong>${escapeHtml(repo.repository)}</strong></a>
+            <a href="https://github.com/${escapeHtml(repo.repository)}" target="_blank" rel="noreferrer noopener" class="external-repo-link" title="Open repository on GitHub">&nearr;</a>
+            <br />${formatDate(repo.firstCommitAt)} to ${formatDate(repo.lastCommitAt)}
+          </div>
           <div class="bar-track"><div class="bar-fill" style="width: ${width}%"></div></div>
         </div>
         <strong>${formatNumber(repo.commitCount)}</strong>
@@ -406,20 +434,52 @@ function renderSkipTable(
 
 function renderHighlightsPanel(report: RunResult): string {
   const highlights = report.statistics.highlights;
-  const categoryRows = highlights.messageCategoryMix
-    ? Object.entries(highlights.messageCategoryMix)
+  const categoryColors: Record<string, string> = {
+    feat: "#127475",
+    fix: "#d96c06",
+    docs: "#2b5c8f",
+    refactor: "#7b2cbf",
+    test: "#38b000",
+    chore: "#6c757d",
+    other: "#9e2a2b",
+  };
+  const categoryMix = highlights.messageCategoryMix;
+  const totalCatCommits = categoryMix
+    ? Object.values(categoryMix).reduce((sum, count) => sum + count, 0)
+    : 0;
+
+  const categorySegments = categoryMix && totalCatCommits > 0
+    ? Object.entries(categoryMix)
+        .filter(([, count]) => count > 0)
+        .map(([category, count]) => {
+          const pct = ((count / totalCatCommits) * 100).toFixed(1);
+          const color = categoryColors[category] || "#6c757d";
+          return `<div class="cat-bar-segment" style="width: ${pct}%; background: ${color};" title="${escapeHtml(category)}: ${formatNumber(count)} (${pct}%)" data-drilldown-category="${escapeHtml(category)}"></div>`;
+        })
+        .join("")
+    : "";
+
+  const categoryRows = categoryMix
+    ? Object.entries(categoryMix)
         .filter(([, count]) => count > 0)
         .map(
-          ([category, count]) =>
-            `<tr><td>${escapeHtml(category)}</td><td>${formatNumber(count)}</td></tr>`,
+          ([category, count]) => {
+            const pct = totalCatCommits > 0 ? ` (${((count / totalCatCommits) * 100).toFixed(1)}%)` : "";
+            return `<tr><td><a href="#commits" class="drilldown-link" data-drilldown-category="${escapeHtml(category)}">${escapeHtml(category)}</a></td><td>${formatNumber(count)}${pct}</td></tr>`;
+          },
         )
         .join("")
     : "";
+
   const codeLevel = highlights.codeLevel;
+  const totalCodeLines = codeLevel ? codeLevel.totalAdditions + codeLevel.totalDeletions : 0;
+  const addPct = totalCodeLines > 0 ? ((codeLevel!.totalAdditions / totalCodeLines) * 100).toFixed(1) : "0";
+  const delPct = totalCodeLines > 0 ? ((codeLevel!.totalDeletions / totalCodeLines) * 100).toFixed(1) : "0";
+
   const topRepoRows = highlights.topRepositories
     .map(
       (repo) =>
-        `<tr><td>${escapeHtml(repo.repository)}</td><td>${formatNumber(repo.commitCount)}</td></tr>`,
+        `<tr><td><a href="#commits" class="drilldown-link" data-drilldown-repo="${escapeHtml(repo.repository)}">${escapeHtml(repo.repository)}</a></td><td>${formatNumber(repo.commitCount)}</td></tr>`,
     )
     .join("");
 
@@ -444,6 +504,7 @@ function renderHighlightsPanel(report: RunResult): string {
               </table>
             </div>
             ${categoryRows ? `<div class="table-wrap" style="margin-bottom: 14px;">
+              ${categorySegments ? `<div style="padding: 14px 14px 0;"><div class="cat-stacked-bar">${categorySegments}</div></div>` : ""}
               <table>
                 <thead>
                   <tr>
@@ -455,7 +516,13 @@ function renderHighlightsPanel(report: RunResult): string {
                   ${categoryRows}
                 </tbody>
               </table>
-            </div>` : ""}
+            </div>` : `<div class="highlight-info-box">
+              <span class="highlight-info-badge">Categories disabled</span>
+              <div>
+                <strong>Category Mix Bar</strong>
+                <p>Conventional commit category mix is available when scanned with <code>--classify-messages</code>.</p>
+              </div>
+            </div>`}
             ${codeLevel ? `<div class="table-wrap">
               <table>
                 <thead>
@@ -465,12 +532,31 @@ function renderHighlightsPanel(report: RunResult): string {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td>Total additions</td><td>${formatNumber(codeLevel.totalAdditions)}</td></tr>
-                  <tr><td>Total deletions</td><td>${formatNumber(codeLevel.totalDeletions)}</td></tr>
+                  <tr><td>Total additions</td><td>+${formatNumber(codeLevel.totalAdditions)}</td></tr>
+                  <tr><td>Total deletions</td><td>-${formatNumber(codeLevel.totalDeletions)}</td></tr>
                   <tr><td>Total files changed</td><td>${formatNumber(codeLevel.totalFilesChanged)}</td></tr>
                 </tbody>
               </table>
-            </div>` : ""}
+              ${totalCodeLines > 0 ? `<div style="padding: 0 14px 14px;">
+                <div class="churn-visual">
+                  <div class="churn-bar">
+                    <div class="churn-add" style="width: ${addPct}%;" title="+${formatNumber(codeLevel.totalAdditions)} (${addPct}%)"></div>
+                    <div class="churn-del" style="width: ${delPct}%;" title="-${formatNumber(codeLevel.totalDeletions)} (${delPct}%)"></div>
+                  </div>
+                  <div class="churn-legend">
+                    <span class="churn-legend-add">+${formatNumber(codeLevel.totalAdditions)} additions (${addPct}%)</span>
+                    <span class="churn-legend-del">-${formatNumber(codeLevel.totalDeletions)} deletions (${delPct}%)</span>
+                    <span>${formatNumber(codeLevel.totalFilesChanged)} files</span>
+                  </div>
+                </div>
+              </div>` : ""}
+            </div>` : `<div class="highlight-info-box">
+              <span class="highlight-info-badge">Diff stats disabled</span>
+              <div>
+                <strong>Code Churn Balance Bar</strong>
+                <p>Additions, deletions, and the churn balance bar require diff stats. Re-scan with <code>--include-diff-stats</code> to populate this metric.</p>
+              </div>
+            </div>`}
           </div>`;
 }
 
@@ -538,7 +624,9 @@ function renderLineChart<T extends object>(
     ${points
       .map((point, index) => {
         const { x, y } = coordinatesOf(point, index);
-        return `<circle cx="${x}" cy="${y}" r="3.8" fill="${stroke}"></circle>`;
+        const label = String(point[labelKey] ?? "");
+        const count = Number(point[valueKey] ?? 0);
+        return `<circle cx="${x}" cy="${y}" r="4" fill="${stroke}" class="chart-point" data-chart-label="${escapeAttribute(label)}" data-chart-value="${count}"></circle>`;
       })
       .join("")}
     <text x="${padding}" y="${padding - 4}" fill="#5f6b7a" font-size="11">Peak ${max}</text>

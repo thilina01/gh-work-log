@@ -23,6 +23,15 @@ const countChip = requireElement("commit-count-chip");
 const exportButton = requireElement("export-csv-button");
 const toggleAllButton = document.getElementById("toggle-all-button");
 const resetFiltersButton = document.getElementById("reset-filters-button");
+const copySummaryButton = document.getElementById("copy-summary-button");
+const heroToggle = document.getElementById("hero-toggle");
+const heroExpandBtn = document.getElementById("hero-expand-btn");
+const heroContainer = document.getElementById("hero-container");
+const heroCompactBar = document.getElementById("hero-compact-bar");
+const chartTooltip = document.getElementById("chart-tooltip");
+const repoSummarySearch = document.getElementById("repo-summary-search");
+const repoSummaryTbody = document.getElementById("repo-summary-tbody");
+const repoSortHeaders = Array.from(document.querySelectorAll("[data-repo-sort-key]"));
 const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
 const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
 const columnControls = Array.from(document.querySelectorAll("[data-column-toggle]"));
@@ -30,6 +39,7 @@ const sortHeaders = Array.from(document.querySelectorAll("[data-sort-key]"));
 const themeToggle = document.getElementById("theme-toggle");
 const storageKey = "gh-work-log-theme";
 const columnsStorageKey = "gh-work-log-columns-v2";
+const heroCompactStorageKey = "gh-work-log-hero-compact";
 const sortState = {
     key: "authoredDateTime",
     direction: "desc",
@@ -377,14 +387,250 @@ tableBody.addEventListener("click", (event) => {
         parentRow.classList.toggle("has-open-detail", !isOpen);
     }
 });
+const tabToHash = {
+    "overview-panel": "overview",
+    "activity-panel": "activity",
+    "repositories-panel": "repositories",
+    "issues-panel": "issues",
+    "commits-panel": "commits",
+};
+const hashToTab = {
+    overview: "overview-panel",
+    activity: "activity-panel",
+    repositories: "repositories-panel",
+    issues: "issues-panel",
+    commits: "commits-panel",
+};
+function activateTab(panelId, updateHash = true) {
+    for (const currentButton of tabButtons) {
+        currentButton.classList.toggle("is-active", currentButton.getAttribute("data-tab") === panelId);
+    }
+    for (const panel of tabPanels) {
+        panel.classList.toggle("is-active", panel.id === panelId);
+    }
+    if (updateHash && tabToHash[panelId]) {
+        window.location.hash = tabToHash[panelId];
+    }
+}
 for (const button of tabButtons) {
     button.addEventListener("click", () => {
         const target = button.getAttribute("data-tab");
-        for (const currentButton of tabButtons) {
-            currentButton.classList.toggle("is-active", currentButton === button);
+        if (target) {
+            activateTab(target, true);
         }
-        for (const panel of tabPanels) {
-            panel.classList.toggle("is-active", panel.id === target);
+    });
+}
+window.addEventListener("hashchange", () => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (hash && hashToTab[hash]) {
+        activateTab(hashToTab[hash], false);
+    }
+});
+function setHeroCompact(compact, persist = true) {
+    if (heroContainer && heroCompactBar) {
+        heroContainer.style.display = compact ? "none" : "";
+        heroCompactBar.style.display = compact ? "" : "none";
+    }
+    if (heroToggle) {
+        heroToggle.textContent = compact ? "Full Header" : "Compact Header";
+    }
+    if (persist) {
+        try {
+            window.localStorage.setItem(heroCompactStorageKey, compact ? "true" : "false");
+        }
+        catch {
+            // Ignore storage errors
+        }
+    }
+}
+if (heroToggle) {
+    heroToggle.addEventListener("click", () => {
+        const isCurrentlyCompact = heroCompactBar ? heroCompactBar.style.display !== "none" : false;
+        setHeroCompact(!isCurrentlyCompact);
+    });
+}
+if (heroExpandBtn) {
+    heroExpandBtn.addEventListener("click", () => {
+        setHeroCompact(false);
+    });
+}
+function loadHeroPreference() {
+    try {
+        const saved = window.localStorage.getItem(heroCompactStorageKey);
+        if (saved === "true") {
+            setHeroCompact(true, false);
+        }
+    }
+    catch {
+        // Ignore storage errors
+    }
+}
+document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target) {
+        return;
+    }
+    const repoLink = target.closest("[data-drilldown-repo]");
+    if (repoLink) {
+        event.preventDefault();
+        const repo = repoLink.getAttribute("data-drilldown-repo");
+        if (repo) {
+            activateTab("commits-panel", true);
+            repoFilter.value = repo;
+            renderRows();
+            document.getElementById("commits-panel")?.scrollIntoView({ behavior: "smooth" });
+        }
+        return;
+    }
+    const catLink = target.closest("[data-drilldown-category]");
+    if (catLink) {
+        event.preventDefault();
+        const cat = catLink.getAttribute("data-drilldown-category");
+        if (cat) {
+            activateTab("commits-panel", true);
+            searchInput.value = cat + ":";
+            renderRows();
+            document.getElementById("commits-panel")?.scrollIntoView({ behavior: "smooth" });
+        }
+        return;
+    }
+});
+document.addEventListener("mouseover", (event) => {
+    const target = event.target;
+    if (!target || !chartTooltip) {
+        return;
+    }
+    const point = target.closest(".chart-point");
+    if (!point) {
+        chartTooltip.style.display = "none";
+        return;
+    }
+    const label = point.getAttribute("data-chart-label");
+    const value = point.getAttribute("data-chart-value");
+    if (label && value !== null) {
+        chartTooltip.textContent = `${label}: ${Number(value).toLocaleString()} commits`;
+        chartTooltip.style.display = "block";
+        const rect = point.getBoundingClientRect();
+        chartTooltip.style.left = `${rect.left + rect.width / 2}px`;
+        chartTooltip.style.top = `${rect.top}px`;
+    }
+});
+document.addEventListener("mouseout", (event) => {
+    const target = event.target;
+    if (target?.closest(".chart-point") && chartTooltip) {
+        chartTooltip.style.display = "none";
+    }
+});
+const repoSortState = {
+    key: "commitCount",
+    direction: "desc",
+};
+const repoRows = (DASHBOARD_DATA.perRepository || []).slice();
+function renderRepoSummary() {
+    if (!repoSummaryTbody) {
+        return;
+    }
+    const query = repoSummarySearch?.value.trim().toLowerCase() || "";
+    const filtered = repoRows.filter((r) => !query || r.repository.toLowerCase().includes(query));
+    filtered.sort((a, b) => {
+        let result = 0;
+        if (repoSortState.key === "commitCount") {
+            result = a.commitCount - b.commitCount;
+        }
+        else if (repoSortState.key === "firstCommitAt") {
+            result = a.firstCommitAt.localeCompare(b.firstCommitAt);
+        }
+        else if (repoSortState.key === "lastCommitAt") {
+            result = a.lastCommitAt.localeCompare(b.lastCommitAt);
+        }
+        else {
+            result = a.repository.localeCompare(b.repository);
+        }
+        return repoSortState.direction === "asc" ? result : -result;
+    });
+    const max = Math.max(...repoRows.map((r) => r.commitCount), 1);
+    repoSummaryTbody.innerHTML = filtered
+        .map((repo) => {
+        const width = Math.max((repo.commitCount / max) * 100, 2);
+        return `<tr data-repo-name="${escapeBrowserHtml(repo.repository.toLowerCase())}">
+      <td>
+        <a href="#commits" class="drilldown-link" data-drilldown-repo="${escapeBrowserHtml(repo.repository)}" title="Filter commits for ${escapeBrowserHtml(repo.repository)}">${escapeBrowserHtml(repo.repository)}</a>
+        <a href="https://github.com/${escapeBrowserHtml(repo.repository)}" target="_blank" rel="noreferrer noopener" class="external-repo-link" title="Open repository on GitHub">&nearr;</a>
+      </td>
+      <td>
+        <div class="repo-volume-cell">
+          <span class="repo-volume-num">${repo.commitCount.toLocaleString()}</span>
+          <div class="bar-track repo-volume-track"><div class="bar-fill" style="width: ${width}%;"></div></div>
+        </div>
+      </td>
+      <td>${formatShortDate(repo.firstCommitAt)}</td>
+      <td>${formatShortDate(repo.lastCommitAt)}</td>
+    </tr>`;
+    })
+        .join("");
+    for (const header of repoSortHeaders) {
+        const indicator = header.querySelector("[data-repo-sort-indicator]");
+        if (indicator) {
+            const key = header.getAttribute("data-repo-sort-key");
+            indicator.textContent = key === repoSortState.key ? (repoSortState.direction === "asc" ? "▲" : "▼") : "";
+        }
+    }
+}
+if (repoSummarySearch) {
+    repoSummarySearch.addEventListener("input", renderRepoSummary);
+}
+for (const header of repoSortHeaders) {
+    header.addEventListener("click", () => {
+        const key = header.getAttribute("data-repo-sort-key");
+        if (!key)
+            return;
+        if (repoSortState.key === key) {
+            repoSortState.direction = repoSortState.direction === "asc" ? "desc" : "asc";
+        }
+        else {
+            repoSortState.key = key;
+            repoSortState.direction = key === "repository" ? "asc" : "desc";
+        }
+        renderRepoSummary();
+    });
+}
+if (copySummaryButton) {
+    copySummaryButton.addEventListener("click", async () => {
+        const summary = DASHBOARD_DATA.summary;
+        const meta = DASHBOARD_DATA.metadata;
+        const highlights = DASHBOARD_DATA.highlights;
+        if (!summary || !meta) {
+            return;
+        }
+        const topRepos = (highlights?.topRepositories || [])
+            .slice(0, 5)
+            .map((r) => `- \`${r.repository}\`: ${r.commitCount.toLocaleString()} commits`)
+            .join("\n");
+        const text = [
+            `### GitHub Work Log Summary (${formatShortDate(meta.since).slice(0, 10)} to ${formatShortDate(meta.until).slice(0, 10)})`,
+            `**Target Author**: ${meta.targetAuthor} | **Authenticated User**: ${meta.authenticatedUser}`,
+            `**Total Commits**: ${summary.uniqueCommits.toLocaleString()} unique across ${summary.repositoriesWithCommits} repositories (${summary.durationSeconds}s scan)`,
+            "",
+            "**Top Repositories**:",
+            topRepos,
+            highlights?.codeLevel
+                ? `\n**Code Churn**: +${highlights.codeLevel.totalAdditions.toLocaleString()} / -${highlights.codeLevel.totalDeletions.toLocaleString()} lines across ${highlights.codeLevel.totalFilesChanged.toLocaleString()} files`
+                : "",
+        ]
+            .filter(Boolean)
+            .join("\n");
+        try {
+            await navigator.clipboard.writeText(text);
+            const originalText = copySummaryButton.textContent;
+            copySummaryButton.textContent = "Copied to Clipboard!";
+            copySummaryButton.classList.add("is-success");
+            setTimeout(() => {
+                copySummaryButton.textContent = originalText;
+                copySummaryButton.classList.remove("is-success");
+            }, 2000);
+        }
+        catch {
+            window.prompt("Copy work log summary:", text);
         }
     });
 }
@@ -448,5 +694,11 @@ if (themeToggle) {
     });
 }
 applyTheme(loadTheme());
+loadHeroPreference();
 loadColumnPreferences();
 renderRows();
+renderRepoSummary();
+const initialHash = window.location.hash.replace(/^#/, "");
+if (initialHash && hashToTab[initialHash]) {
+    activateTab(hashToTab[initialHash], false);
+}

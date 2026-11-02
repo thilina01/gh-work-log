@@ -39,16 +39,34 @@ ${VISUALIZER_STYLES}
   <body>
     <div class="page">
       <div class="page-topbar">
-        <button id="theme-toggle" class="theme-toggle" type="button">Dark Theme</button>
+        <div class="topbar-left">
+          <button id="copy-summary-button" class="topbar-btn" type="button">Copy Markdown Summary</button>
+        </div>
+        <div class="topbar-right">
+          <button id="hero-toggle" class="topbar-btn" type="button">Compact Header</button>
+          <button id="theme-toggle" class="theme-toggle" type="button">Dark Theme</button>
+        </div>
       </div>
-      ${renderHero(report)}
-      ${renderMetricCards(report)}
+      <div id="hero-container">
+        ${renderHero(report)}
+        ${renderMetricCards(report)}
+      </div>
+      <div id="hero-compact-bar" class="panel hero-compact-bar" style="display: none;">
+        <div class="hero-compact-content">
+          <strong>${report.metadata.targetAuthor}</strong> &bull;
+          <span>${report.statistics.summary.uniqueCommits} commits</span> &bull;
+          <span>${report.statistics.summary.repositoriesWithCommits} repositories</span> &bull;
+          <span>${report.metadata.since.slice(0, 10)} to ${report.metadata.until.slice(0, 10)}</span>
+        </div>
+        <button id="hero-expand-btn" class="topbar-btn" type="button">Expand Header &#9660;</button>
+      </div>
       ${renderTabStrip()}
       ${renderOverviewTab(report)}
       ${renderActivityTab(report)}
       ${renderRepositoriesTab(report)}
       ${renderIssuesTab(report)}
       ${renderCommitsTab(report)}
+      <div id="chart-tooltip" class="chart-tooltip" style="display: none;"></div>
       <p class="footer-note">
         This file is fully standalone. Re-run the visualizer with a fresh JSON export whenever you want an updated dashboard.
       </p>
