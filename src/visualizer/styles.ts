@@ -50,7 +50,7 @@ export const VISUALIZER_STYLES = `
       }
 
       .page {
-        width: min(1440px, calc(100vw - 32px));
+        width: min(1680px, calc(100vw - 32px));
         margin: 0 auto;
         padding: 32px 0 56px;
       }
@@ -340,10 +340,198 @@ export const VISUALIZER_STYLES = `
 
       th,
       td {
-        padding: 12px 14px;
+        padding: 8px 12px;
         text-align: left;
         border-bottom: 1px solid var(--line);
-        font-size: 14px;
+        font-size: 13px;
+        vertical-align: top;
+      }
+
+      td[data-column="authored"] {
+        white-space: nowrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      td[data-column="repository"] {
+        white-space: nowrap;
+        font-weight: 500;
+      }
+
+      .repo-org {
+        color: var(--muted);
+        opacity: 0.65;
+        font-weight: normal;
+      }
+
+      .repo-name {
+        font-weight: 600;
+      }
+
+      td[data-column="branch"],
+      td[data-column="scanBranch"],
+      td[data-column="sha"],
+      td[data-column="wip"],
+      td[data-column="merge"],
+      td[data-column="mergeAuthor"] {
+        white-space: nowrap;
+      }
+
+      td[data-column="sha"] code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      td[data-column="message"] {
+        width: 100%;
+      }
+
+      .commit-msg-cell {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .commit-subject {
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .commit-expand-btn {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 6px;
+        height: 18px;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border: 1px solid var(--line);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 120ms ease, color 120ms ease;
+      }
+
+      .commit-expand-btn:hover,
+      .commit-expand-btn.is-active {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      tr.has-open-detail td {
+        border-bottom-color: transparent;
+      }
+
+      .commit-detail-row {
+        background: rgba(20, 33, 61, 0.02);
+      }
+
+      body[data-theme="dark"] .commit-detail-row {
+        background: rgba(0, 0, 0, 0.22);
+      }
+
+      .commit-detail-row:hover {
+        background: rgba(20, 33, 61, 0.02) !important;
+      }
+
+      body[data-theme="dark"] .commit-detail-row:hover {
+        background: rgba(0, 0, 0, 0.22) !important;
+      }
+
+      .commit-detail-cell {
+        padding: 4px 14px 12px !important;
+        border-bottom: 1px solid var(--line) !important;
+      }
+
+      .commit-detail-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 8px;
+        font-size: 12px;
+      }
+
+      .commit-detail-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      .commit-detail-sha code {
+        font-weight: 700;
+        color: var(--teal);
+        background: rgba(18, 116, 117, 0.12);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+
+      body[data-theme="dark"] .commit-detail-sha code {
+        background: rgba(87, 199, 196, 0.18);
+      }
+
+      .commit-detail-branch {
+        padding: 2px 7px;
+        border-radius: 4px;
+        background: rgba(20, 33, 61, 0.06);
+        border: 1px solid var(--line);
+        font-size: 11px;
+      }
+
+      body[data-theme="dark"] .commit-detail-branch {
+        background: rgba(237, 243, 255, 0.08);
+      }
+
+      .commit-detail-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: var(--accent-soft);
+        border: 1px solid transparent;
+        transition: background 120ms ease, color 120ms ease;
+      }
+
+      .commit-detail-link:hover {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .commit-body {
+        margin: 0;
+        padding: 10px 14px;
+        border-radius: 8px;
+        background: rgba(20, 33, 61, 0.05);
+        border: 1px solid var(--line);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 320px;
+        overflow-y: auto;
+      }
+
+      body[data-theme="dark"] .commit-body {
+        background: rgba(10, 16, 24, 0.7);
+        border-color: rgba(190, 208, 234, 0.14);
+        color: #dbe4f0;
       }
 
       th {
@@ -553,6 +741,26 @@ export const VISUALIZER_STYLES = `
         cursor: not-allowed;
         background: var(--accent-soft);
         color: var(--accent);
+      }
+
+      .reset-filter-btn {
+        appearance: none;
+        border: 1px solid var(--rose);
+        background: rgba(171, 35, 70, 0.08);
+        color: var(--rose);
+        padding: 9px 14px;
+        border-radius: 14px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+        transition: background 120ms ease, color 120ms ease;
+      }
+
+      .reset-filter-btn:hover {
+        background: var(--rose);
+        color: #fff;
       }
 
       .empty {

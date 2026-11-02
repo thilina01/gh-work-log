@@ -21,16 +21,41 @@ const tableBody = requireElement("commit-table-body");
 const resultsMeta = requireElement("commit-results-meta");
 const countChip = requireElement("commit-count-chip");
 const exportButton = requireElement("export-csv-button");
+const toggleAllButton = document.getElementById("toggle-all-button");
+const resetFiltersButton = document.getElementById("reset-filters-button");
 const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
 const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
 const columnControls = Array.from(document.querySelectorAll("[data-column-toggle]"));
 const sortHeaders = Array.from(document.querySelectorAll("[data-sort-key]"));
 const themeToggle = document.getElementById("theme-toggle");
 const storageKey = "gh-work-log-theme";
+const columnsStorageKey = "gh-work-log-columns-v2";
 const sortState = {
     key: "authoredDateTime",
     direction: "desc",
 };
+function formatShortDate(isoString) {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) {
+        return isoString;
+    }
+    const pad = (n) => (n < 10 ? "0" + n : String(n));
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+function formatRepoName(repo) {
+    const slashIndex = repo.indexOf("/");
+    if (slashIndex === -1) {
+        return `<span class="repo-name">${escapeBrowserHtml(repo)}</span>`;
+    }
+    const org = repo.slice(0, slashIndex + 1);
+    const name = repo.slice(slashIndex + 1);
+    return `<span class="repo-org">${escapeBrowserHtml(org)}</span><span class="repo-name">${escapeBrowserHtml(name)}</span>`;
+}
 function resolveAuthorLabel(row) {
     if (row.isMergeCommit && row.mergeBranchAuthorLogin) {
         return row.mergeBranchAuthorLogin;
@@ -59,7 +84,7 @@ for (const author of authors) {
     authorFilter.appendChild(option);
 }
 const exportColumns = [
-    { key: "authored", header: "Authored", getValue: (row) => new Date(row.authoredDateTime).toLocaleString() },
+    { key: "authored", header: "Authored", getValue: (row) => formatShortDate(row.authoredDateTime) },
     { key: "repository", header: "Repository", getValue: (row) => row.repository },
     { key: "branch", header: "Branch", getValue: (row) => row.branch },
     { key: "scanBranch", header: "Scan Branch", getValue: (row) => row.scanBranch },
@@ -185,7 +210,7 @@ function renderRows() {
     }).sort(compareRows);
     lastFilteredRows = filtered;
     exportButton.disabled = filtered.length === 0;
-    tableBody.innerHTML = filtered.map((row) => {
+    tableBody.innerHTML = filtered.map((row, index) => {
         const shortSha = row.sha.slice(0, 8);
         const badge = row.isWip
             ? '<span class="chip" style="border-color: rgba(171,35,70,.18); color: #ab2346;">WIP</span>'
@@ -197,17 +222,44 @@ function renderRows() {
         const mergeAuthorBadge = authorLabel
             ? '<span class="chip"' + (row.mergeIncludesExternalAuthor ? ' style="border-color: rgba(214,108,6,.25); color: #d96c06;"' : '') + '>' + escapeBrowserHtml(authorLabel) + '</span>'
             : '<span class="chip">&mdash;</span>';
-        return '<tr>' +
-            '<td data-column="authored">' + escapeBrowserHtml(new Date(row.authoredDateTime).toLocaleString()) + '</td>' +
-            '<td data-column="repository">' + escapeBrowserHtml(row.repository) + '</td>' +
+        const lines = row.message.trim().split("\n");
+        const subject = lines[0] ?? "";
+        const body = lines.slice(1).join("\n").trim();
+        const expandBtn = body
+            ? ' <button type="button" class="commit-expand-btn" data-toggle-subrow="' + index + '" title="Toggle full description">&hellip;</button>'
+            : '';
+        const mainRow = '<tr class="commit-row">' +
+            '<td data-column="authored">' + escapeBrowserHtml(formatShortDate(row.authoredDateTime)) + '</td>' +
+            '<td data-column="repository">' + formatRepoName(row.repository) + '</td>' +
             '<td data-column="branch">' + escapeBrowserHtml(row.branch) + '</td>' +
             '<td data-column="scanBranch">' + escapeBrowserHtml(row.scanBranch) + '</td>' +
             '<td data-column="sha"><a class="sha-link" href="' + escapeBrowserHtml(row.url) + '" target="_blank" rel="noreferrer noopener"><code>' + escapeBrowserHtml(shortSha) + '</code></a></td>' +
-            '<td data-column="message">' + escapeBrowserHtml(row.message) + '</td>' +
+            '<td data-column="message"><div class="commit-msg-cell"><span class="commit-subject">' + escapeBrowserHtml(subject) + '</span>' + expandBtn + '</div></td>' +
             '<td data-column="wip">' + badge + '</td>' +
             '<td data-column="merge">' + mergeBadge + '</td>' +
             '<td data-column="mergeAuthor">' + mergeAuthorBadge + '</td>' +
             '</tr>';
+        const branchLabel = row.branch === row.scanBranch
+            ? row.branch
+            : row.branch + ' (scanned ' + row.scanBranch + ')';
+        const detailRow = body
+            ? '<tr class="commit-detail-row" id="detail-row-' + index + '" style="display: none;">' +
+                '<td colspan="9" class="commit-detail-cell">' +
+                '<div class="commit-detail-bar">' +
+                '<div class="commit-detail-meta">' +
+                '<span class="commit-detail-sha"><code>' + escapeBrowserHtml(shortSha) + '</code></span>' +
+                '<span class="commit-detail-branch">' + escapeBrowserHtml(branchLabel) + '</span>' +
+                (authorLabel ? '<span class="chip">' + escapeBrowserHtml(authorLabel) + '</span>' : '') +
+                (row.isWip ? '<span class="chip" style="border-color: rgba(171,35,70,.18); color: #ab2346;">WIP</span>' : '') +
+                (row.isMergeCommit ? '<span class="chip" style="border-color: rgba(18,116,117,.18); color: #127475;">Merge</span>' : '') +
+                '</div>' +
+                '<a class="commit-detail-link" href="' + escapeBrowserHtml(row.url) + '" target="_blank" rel="noreferrer noopener">View on GitHub &nearr;</a>' +
+                '</div>' +
+                '<pre class="commit-body">' + escapeBrowserHtml(body) + '</pre>' +
+                '</td>' +
+                '</tr>'
+            : '';
+        return mainRow + detailRow;
     }).join("");
     const filteredCount = filtered.length;
     const totalCount = rows.length;
@@ -216,6 +268,20 @@ function renderRows() {
         : filteredCount + ' of ' + totalCount + ' commits shown';
     resultsMeta.textContent = summary;
     countChip.textContent = filteredCount.toLocaleString() + ' rows';
+    const hasActiveFilter = Boolean(repoValue ||
+        branchValue ||
+        authorValue ||
+        wipValue ||
+        mergeValue ||
+        externalAuthorValue ||
+        query);
+    if (resetFiltersButton) {
+        resetFiltersButton.style.display = hasActiveFilter ? "" : "none";
+    }
+    if (toggleAllButton) {
+        toggleAllButton.textContent = "Expand All";
+        toggleAllButton.disabled = filtered.length === 0;
+    }
     if (filtered.length === 0) {
         tableBody.innerHTML = '<tr><td colspan="9"><div class="empty">No commits match the current filters.</div></td></tr>';
     }
@@ -256,6 +322,61 @@ mergeFilter.addEventListener("change", renderRows);
 externalAuthorFilter.addEventListener("change", renderRows);
 searchInput.addEventListener("input", renderRows);
 exportButton.addEventListener("click", exportFilteredCommitsToCsv);
+if (resetFiltersButton) {
+    resetFiltersButton.addEventListener("click", () => {
+        searchInput.value = "";
+        repoFilter.value = "";
+        branchFilter.value = "";
+        authorFilter.value = "";
+        wipFilter.value = "";
+        mergeFilter.value = "";
+        externalAuthorFilter.value = "";
+        renderRows();
+    });
+}
+if (toggleAllButton) {
+    toggleAllButton.addEventListener("click", () => {
+        const detailRows = Array.from(document.querySelectorAll(".commit-detail-row"));
+        const expandButtons = Array.from(document.querySelectorAll("[data-toggle-subrow]"));
+        const parentRows = Array.from(document.querySelectorAll("tr.commit-row"));
+        const isExpanding = toggleAllButton.textContent === "Expand All";
+        for (const detailRow of detailRows) {
+            detailRow.style.display = isExpanding ? "" : "none";
+        }
+        for (const button of expandButtons) {
+            button.classList.toggle("is-active", isExpanding);
+        }
+        for (const parentRow of parentRows) {
+            parentRow.classList.toggle("has-open-detail", isExpanding);
+        }
+        toggleAllButton.textContent = isExpanding ? "Collapse All" : "Expand All";
+    });
+}
+tableBody.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target) {
+        return;
+    }
+    const button = target.closest("[data-toggle-subrow]");
+    if (!button) {
+        return;
+    }
+    const index = button.getAttribute("data-toggle-subrow");
+    if (!index) {
+        return;
+    }
+    const detailRow = document.getElementById("detail-row-" + index);
+    if (!detailRow) {
+        return;
+    }
+    const isOpen = detailRow.style.display !== "none";
+    detailRow.style.display = isOpen ? "none" : "";
+    button.classList.toggle("is-active", !isOpen);
+    const parentRow = button.closest("tr");
+    if (parentRow) {
+        parentRow.classList.toggle("has-open-detail", !isOpen);
+    }
+});
 for (const button of tabButtons) {
     button.addEventListener("click", () => {
         const target = button.getAttribute("data-tab");
@@ -267,8 +388,41 @@ for (const button of tabButtons) {
         }
     });
 }
+function loadColumnPreferences() {
+    try {
+        const saved = window.localStorage.getItem(columnsStorageKey);
+        if (!saved) {
+            return;
+        }
+        const visibleColumns = new Set(JSON.parse(saved));
+        for (const control of columnControls) {
+            const col = control.getAttribute("data-column-toggle");
+            if (col) {
+                control.checked = visibleColumns.has(col);
+            }
+        }
+    }
+    catch {
+        // Ignore storage access errors (e.g. disabled in a private window).
+    }
+}
+function persistColumnPreferences() {
+    try {
+        const visibleColumns = columnControls
+            .filter((control) => control.checked)
+            .map((control) => control.getAttribute("data-column-toggle"))
+            .filter((col) => Boolean(col));
+        window.localStorage.setItem(columnsStorageKey, JSON.stringify(visibleColumns));
+    }
+    catch {
+        // Ignore storage access errors (e.g. disabled in a private window).
+    }
+}
 for (const control of columnControls) {
-    control.addEventListener("change", applyColumnVisibility);
+    control.addEventListener("change", () => {
+        applyColumnVisibility();
+        persistColumnPreferences();
+    });
 }
 for (const header of sortHeaders) {
     header.addEventListener("click", () => {
@@ -294,4 +448,5 @@ if (themeToggle) {
     });
 }
 applyTheme(loadTheme());
+loadColumnPreferences();
 renderRows();

@@ -217,6 +217,7 @@ export function renderCommitsTab(report: RunResult): string {
             </div>
             <div class="header-actions">
               <div class="chip" id="commit-count-chip">${formatNumber(report.data.length)} rows</div>
+              <button id="toggle-all-button" class="export-button" type="button">Expand All</button>
               <button id="export-csv-button" class="export-button" type="button">Export CSV</button>
             </div>
           </div>
@@ -246,17 +247,18 @@ export function renderCommitsTab(report: RunResult): string {
               <option value="true">External-author merges only</option>
               <option value="false">Exclude external-author merges</option>
             </select>
+            <button id="reset-filters-button" class="reset-filter-btn" type="button" style="display: none;">Reset Filters</button>
           </div>
           <div class="column-controls" id="column-controls">
-            ${renderColumnToggle("authored", "Authored")}
-            ${renderColumnToggle("repository", "Repository")}
-            ${renderColumnToggle("branch", "Branch")}
-            ${renderColumnToggle("scanBranch", "Scan Branch")}
-            ${renderColumnToggle("sha", "SHA")}
-            ${renderColumnToggle("message", "Message")}
-            ${renderColumnToggle("wip", "WIP")}
-            ${renderColumnToggle("merge", "Merge")}
-            ${renderColumnToggle("mergeAuthor", "Author")}
+            ${renderColumnToggle("authored", "Authored", true)}
+            ${renderColumnToggle("repository", "Repository", true)}
+            ${renderColumnToggle("branch", "Branch", false)}
+            ${renderColumnToggle("scanBranch", "Scan Branch", false)}
+            ${renderColumnToggle("sha", "SHA", false)}
+            ${renderColumnToggle("message", "Message", true)}
+            ${renderColumnToggle("wip", "WIP", false)}
+            ${renderColumnToggle("merge", "Merge", false)}
+            ${renderColumnToggle("mergeAuthor", "Author", false)}
           </div>
           <div class="results-meta" id="commit-results-meta"></div>
           <div class="table-wrap table-wrap--commits">
@@ -293,9 +295,9 @@ function metricCard(label: string, value: number, hint: string): string {
   </div>`;
 }
 
-function renderColumnToggle(column: string, label: string): string {
+function renderColumnToggle(column: string, label: string, checked = true): string {
   return `<label class="column-toggle">
-    <input type="checkbox" data-column-toggle="${escapeHtml(column)}" checked />
+    <input type="checkbox" data-column-toggle="${escapeHtml(column)}"${checked ? " checked" : ""} />
     <span>${escapeHtml(label)}</span>
   </label>`;
 }
