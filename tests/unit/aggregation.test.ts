@@ -241,6 +241,8 @@ describe("aggregation", () => {
       expect.objectContaining({
         repository: "org/service",
         commitCount: 2,
+        firstCommitAt: "2026-03-02T10:00:00.000Z",
+        lastCommitAt: "2026-03-02T11:00:00.000Z",
         wipCommitCount: 0,
         mergeCommitCount: 1,
         externalAuthorMergeCount: 1,

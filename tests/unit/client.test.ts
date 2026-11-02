@@ -168,36 +168,47 @@ describe("GitHub API response validation", () => {
   });
 
   it("maps a validated GraphQL commit history", async () => {
+    let graphqlInput = "";
     const client = new GitHubClient(
-      makeConfig(),
+      { ...makeConfig(), includeDiffStats: true },
       new Logger(false),
-      responseRunner(
-        JSON.stringify({
-          data: {
-            repository: {
-              ref: {
-                target: {
-                  history: {
-                    nodes: [
-                      {
-                        oid: "abc",
-                        message: "feat: validated",
-                        messageHeadline: "feat: validated",
-                        authoredDate: "2026-03-02T10:00:00Z",
-                        committedDate: null,
-                        url: "https://github.com/org/service/commit/abc",
-                        author: { email: "alice@example.com", user: { login: "alice" } },
-                        parents: { totalCount: 1, nodes: [{ author: null }] },
+      {
+        async run(_command, _args, options) {
+          graphqlInput = options?.input ?? "";
+          return {
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  ref: {
+                    target: {
+                      history: {
+                        nodes: [
+                          {
+                            oid: "abc",
+                            message: "feat: validated",
+                            messageHeadline: "feat: validated",
+                            authoredDate: "2026-03-02T10:00:00Z",
+                            committedDate: null,
+                            additions: 2,
+                            deletions: 1,
+                            changedFiles: 3,
+                            url: "https://github.com/org/service/commit/abc",
+                            author: { email: "alice@example.com", user: { login: "alice" } },
+                            parents: { totalCount: 1, nodes: [{ author: null }] },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
                       },
-                    ],
-                    pageInfo: { hasNextPage: false, endCursor: null },
+                    },
                   },
                 },
               },
-            },
-          },
-        }),
-      ),
+            }),
+            stderr: "",
+            exitCode: 0,
+          };
+        },
+      },
     );
 
     const result = await client.listBranchCommits({
@@ -218,8 +229,18 @@ describe("GitHub API response validation", () => {
     });
 
     expect(result.observations).toMatchObject([
-      { sha: "abc", message: "feat: validated", authorLogin: "alice" },
+      {
+        sha: "abc",
+        message: "feat: validated",
+        authorLogin: "alice",
+        additions: 2,
+        deletions: 1,
+        filesChanged: 3,
+      },
     ]);
+    expect(graphqlInput).toContain("additions");
+    expect(graphqlInput).toContain("deletions");
+    expect(graphqlInput).toContain("changedFiles");
   });
 
   it("omits an absent HTTP status from failure records", () => {

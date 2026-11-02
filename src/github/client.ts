@@ -252,7 +252,7 @@ export class GitHubClient {
 
     while (true) {
       const response = await this.api.postGraphql(
-        buildCommitHistoryQuery(),
+        buildCommitHistoryQuery(this.config.includeDiffStats),
         {
           owner: repository.ownerLogin,
           name: repository.name,
@@ -283,6 +283,15 @@ export class GitHubClient {
           messageHeadline: node.messageHeadline,
           authoredDateTime: toUtcIso(node.authoredDate),
           committedDateTime: node.committedDate ? toUtcIso(node.committedDate) : null,
+          ...(node.additions !== undefined &&
+          node.deletions !== undefined &&
+          node.changedFiles !== undefined
+            ? {
+                additions: node.additions,
+                deletions: node.deletions,
+                filesChanged: node.changedFiles,
+              }
+            : {}),
           url: node.url,
           sourceMode: branch === repository.defaultBranch ? "default_branch" : "feature_branch",
           authorLogin: node.author?.user?.login ?? null,
@@ -305,7 +314,7 @@ export class GitHubClient {
 
 }
 
-function buildCommitHistoryQuery(): string {
+function buildCommitHistoryQuery(includeDiffStats: boolean): string {
   return `
     query CommitHistory(
       $owner: String!
@@ -334,6 +343,7 @@ function buildCommitHistoryQuery(): string {
                   messageHeadline
                   authoredDate
                   committedDate
+                  ${includeDiffStats ? "additions\n                  deletions\n                  changedFiles" : ""}
                   url
                   author {
                     email

@@ -96,7 +96,7 @@ paths as well as successful behavior when adding integrations.
 The coverage command enforces minimums of 75% lines/statements, 70% branches,
 and 80% functions for application source. Generated browser-client code, CLI
 entrypoints, and type-only modules are excluded. The current measured baseline
-is 90.87% lines, 76.05% branches, and 93.78% functions.
+is 90.98% lines, 77.23% branches, and 93.62% functions.
 
 Local defaults:
 
@@ -355,9 +355,12 @@ Branch handling:
 - Default-branch scanning is always the baseline path
 - Feature branches are scanned only when `--scan-feature-branches` is enabled
 - Matching branches are determined by the configured branch patterns
-- Default- and matching feature-branch commit requests share a global concurrency limit of five
+- Default-branch history and branch discovery run concurrently when feature-branch scanning is enabled
+- All GitHub client operations share a global concurrency limit of five, including branch discovery and optional enrichments
 - Branch results and failures retain deterministic order regardless of request completion order
 - API requests retry up to three times for rate limiting, selected transient HTTP errors, and transient connection/time-out failures, using the configured backoff
+- With `--include-diff-stats`, additions, deletions, and changed-file counts are returned with commit history, avoiding a separate REST request per commit. A REST fallback is used only if a client omits those fields.
+- Associated pull-request lookups run concurrently with any required diff-stat fallback, within the shared limit
 
 Attribution:
 
@@ -547,7 +550,8 @@ Test coverage:
 - unit tests for config normalization, aggregation, pattern matching, and HTML rendering
 - API-client tests for response validation, pagination, retries, and mapping
 - browser-DOM tests for dashboard filtering and sorting
-- integration tests for app behavior and globally bounded branch concurrency with a mocked GitHub client
+- integration tests for app behavior, concurrent branch discovery, globally bounded client operations, inline diff stats, and enrichment fallback concurrency
+- per-repository summary statistics are accumulated in one pass over commit records
 - `npm run test:coverage` reports coverage and enforces the configured thresholds
 
 Repository quality gates:

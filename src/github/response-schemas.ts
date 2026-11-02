@@ -9,6 +9,9 @@ export interface GraphqlCommitResponse {
             messageHeadline: string;
             authoredDate: string;
             committedDate: string | null;
+            additions?: number;
+            deletions?: number;
+            changedFiles?: number;
             url: string;
             author: {
               email: string | null;
@@ -149,6 +152,9 @@ export function isGraphqlCommitResponse(value: unknown): value is GraphqlCommitR
       !isString(node.messageHeadline) ||
       !isString(node.authoredDate) ||
       !isNullableString(node.committedDate) ||
+      (node.additions !== undefined && !isNumber(node.additions)) ||
+      (node.deletions !== undefined && !isNumber(node.deletions)) ||
+      (node.changedFiles !== undefined && !isNumber(node.changedFiles)) ||
       !isString(node.url) ||
       !isGraphqlAuthor(node.author) ||
       !isRecord(node.parents) ||

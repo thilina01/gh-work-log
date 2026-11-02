@@ -111,46 +111,69 @@ class FakeGitHubClient implements GitHubClientLike {
   }> {
     return { additions: 7, deletions: 3, filesChanged: 2 };
   }
+
+  public async getAssociatedPullRequests(): Promise<
+    Array<{ number: number; url: string; title: string; state: string }>
+  > {
+    return [
+      {
+        number: 42,
+        url: "https://github.com/alice/project-a/pull/42",
+        title: "Add report",
+        state: "merged",
+      },
+    ];
+  }
 }
 
 describe("runApp", () => {
-  it("scans branches concurrently without exceeding the configured global limit", async () => {
-    const repositories = [makeRepository("org/first"), makeRepository("org/second")];
-    const client = new FakeGitHubClient(repositories, {
+  it("overlaps branch discovery with the default scan and globally limits client operations", async () => {
+    const repository = makeRepository("org/first");
+    const client = new FakeGitHubClient([repository], {
       "org/first": [
         { branch: "main", commits: [] },
         { branch: "feature/a", commits: [] },
         { branch: "feature/b", commits: [] },
       ],
-      "org/second": [
-        { branch: "main", commits: [] },
-        { branch: "feature/c", commits: [] },
-        { branch: "feature/d", commits: [] },
-      ],
     });
     const originalListBranchCommits = client.listBranchCommits.bind(client);
+    const originalListBranches = client.listBranches.bind(client);
     let activeRequests = 0;
     let peakRequests = 0;
-    let activeFeatureRequests = 0;
-    let peakFeatureRequests = 0;
+    let branchDiscoveryOverlappedDefaultScan = false;
+    let defaultScanActive = false;
+    let branchDiscoveryActive = false;
     const scannedBranches: string[] = [];
 
+    client.listBranches = async (repository) => {
+      activeRequests += 1;
+      peakRequests = Math.max(peakRequests, activeRequests);
+      branchDiscoveryActive = true;
+      branchDiscoveryOverlappedDefaultScan ||= defaultScanActive;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await originalListBranches(repository);
+      } finally {
+        branchDiscoveryActive = false;
+        activeRequests -= 1;
+      }
+    };
     client.listBranchCommits = async (params) => {
       activeRequests += 1;
       peakRequests = Math.max(peakRequests, activeRequests);
-      if (params.branch !== "main") {
-        activeFeatureRequests += 1;
-        peakFeatureRequests = Math.max(peakFeatureRequests, activeFeatureRequests);
+      if (params.branch === "main") {
+        defaultScanActive = true;
+        branchDiscoveryOverlappedDefaultScan ||= branchDiscoveryActive;
       }
       scannedBranches.push(`${params.repository.fullName}:${params.branch}`);
       try {
         await new Promise((resolve) => setTimeout(resolve, 5));
         return await originalListBranchCommits(params);
       } finally {
-        activeRequests -= 1;
-        if (params.branch !== "main") {
-          activeFeatureRequests -= 1;
+        if (params.branch === "main") {
+          defaultScanActive = false;
         }
+        activeRequests -= 1;
       }
     };
 
@@ -160,8 +183,121 @@ describe("runApp", () => {
     });
 
     expect(peakRequests).toBe(2);
-    expect(peakFeatureRequests).toBe(2);
-    expect(scannedBranches).toHaveLength(6);
+    expect(branchDiscoveryOverlappedDefaultScan).toBe(true);
+    expect(scannedBranches).toHaveLength(3);
+  });
+
+  it("overlaps diff-stat fallback and pull-request enrichment when stats are omitted", async () => {
+    const repository = makeRepository("alice/project-a");
+    const client = new FakeGitHubClient(
+      [repository],
+      {
+        "alice/project-a": [
+          {
+            branch: "main",
+            commits: [
+              makeObservation(
+                repository,
+                "main",
+                "abc",
+                "feat: add report",
+                "2026-03-02T10:00:00.000Z",
+              ),
+            ],
+          },
+        ],
+      },
+    );
+    const getStats = client.getCommitDiffStats.bind(client);
+    const getPulls = client.getAssociatedPullRequests.bind(client);
+    let activeEnrichments = 0;
+    let enrichmentsOverlapped = false;
+
+    client.getCommitDiffStats = async (...args) => {
+      activeEnrichments += 1;
+      enrichmentsOverlapped ||= activeEnrichments > 1;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await getStats(...args);
+      } finally {
+        activeEnrichments -= 1;
+      }
+    };
+    client.getAssociatedPullRequests = async (...args) => {
+      activeEnrichments += 1;
+      enrichmentsOverlapped ||= activeEnrichments > 1;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await getPulls(...args);
+      } finally {
+        activeEnrichments -= 1;
+      }
+    };
+
+    const result = await runApp(
+      makeConfig({
+        concurrency: 2,
+        scanFeatureBranches: false,
+        enrichPrs: true,
+      }),
+      {
+        client,
+        writeJson: async () => {},
+      },
+    );
+
+    expect(enrichmentsOverlapped).toBe(true);
+    expect(result.data[0]).toMatchObject({
+      additions: 7,
+      deletions: 3,
+      filesChanged: 2,
+      associatedPullRequests: [{ number: 42, state: "merged" }],
+    });
+  });
+
+  it("uses diff stats returned with commit history without making enrichment requests", async () => {
+    const repository = makeRepository("alice/project-a");
+    const client = new FakeGitHubClient(
+      [repository],
+      {
+        "alice/project-a": [
+          {
+            branch: "main",
+            commits: [
+              {
+                ...makeObservation(
+                  repository,
+                  "main",
+                  "abc",
+                  "feat: add report",
+                  "2026-03-02T10:00:00.000Z",
+                ),
+                additions: 7,
+                deletions: 3,
+                filesChanged: 2,
+              },
+            ],
+          },
+        ],
+      },
+    );
+    let diffStatRequests = 0;
+    client.getCommitDiffStats = async () => {
+      diffStatRequests += 1;
+      return { additions: 0, deletions: 0, filesChanged: 0 };
+    };
+
+    const result = await runApp(
+      makeConfig({ scanFeatureBranches: false }),
+      { client, writeJson: async () => {} },
+    );
+
+    expect(diffStatRequests).toBe(0);
+    expect(result.data[0]).toMatchObject({
+      additions: 7,
+      deletions: 3,
+      filesChanged: 2,
+    });
   });
 
   it("writes a dry-run result with discovery and skip details", async () => {

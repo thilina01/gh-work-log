@@ -35,12 +35,11 @@ export function buildRunResult(params: {
   failures: FailureRecord[];
   startedAtMs: number;
   endedAtMs: number;
+  commits?: CommitRecord[];
 }): RunResult {
-  const commits = buildCommitRecords(
-    params.observations,
-    params.repositoryMap,
-    params.config,
-  );
+  const commits =
+    params.commits ??
+    buildCommitRecords(params.observations, params.repositoryMap, params.config);
   const statistics = buildStatistics({
     config: params.config,
     commits,
@@ -142,7 +141,10 @@ export function buildCommitRecords(
     }
 
     const diffObservation = sortedObservations.find(
-      (item) => item.additions !== undefined,
+      (item) =>
+        item.additions !== undefined &&
+        item.deletions !== undefined &&
+        item.filesChanged !== undefined,
     );
 
     if (
@@ -370,28 +372,59 @@ function buildPerRepositorySummary(
   repositoryMap: Map<string, RepositoryRecord>,
   featureBranchScanEnabled: boolean,
 ): RepositorySummary[] {
-  const grouped = groupBy(commits, (commit) => commit.repository);
+  const summaries = new Map<
+    string,
+    {
+      defaultBranch: string;
+      commitCount: number;
+      firstCommitAt: string;
+      lastCommitAt: string;
+      wipCommitCount: number;
+      mergeCommitCount: number;
+      externalAuthorMergeCount: number;
+    }
+  >();
 
-  return Array.from(grouped.entries())
-    .map(([repository, repositoryCommits]) => {
-      const sorted = [...repositoryCommits].sort((left, right) =>
-        left.authoredDateTime.localeCompare(right.authoredDateTime),
-      );
-
-      return {
-        repository,
-        defaultBranch: repositoryMap.get(repository)?.defaultBranch ?? sorted[0]!.branch,
-        featureBranchScanEnabled,
-        commitCount: sorted.length,
-        firstCommitAt: sorted[0]!.authoredDateTime,
-        lastCommitAt: sorted[sorted.length - 1]!.authoredDateTime,
-        wipCommitCount: sorted.filter((commit) => commit.isWip).length,
-        mergeCommitCount: sorted.filter((commit) => commit.isMergeCommit).length,
-        externalAuthorMergeCount: sorted.filter(
-          (commit) => commit.mergeIncludesExternalAuthor,
-        ).length,
+  for (const commit of commits) {
+    let summary = summaries.get(commit.repository);
+    if (!summary) {
+      summary = {
+        defaultBranch:
+          repositoryMap.get(commit.repository)?.defaultBranch ?? commit.branch,
+        commitCount: 0,
+        firstCommitAt: commit.authoredDateTime,
+        lastCommitAt: commit.authoredDateTime,
+        wipCommitCount: 0,
+        mergeCommitCount: 0,
+        externalAuthorMergeCount: 0,
       };
-    })
+      summaries.set(commit.repository, summary);
+    }
+
+    summary.commitCount += 1;
+    if (commit.authoredDateTime < summary.firstCommitAt) {
+      summary.firstCommitAt = commit.authoredDateTime;
+    }
+    if (commit.authoredDateTime > summary.lastCommitAt) {
+      summary.lastCommitAt = commit.authoredDateTime;
+    }
+    if (commit.isWip) {
+      summary.wipCommitCount += 1;
+    }
+    if (commit.isMergeCommit) {
+      summary.mergeCommitCount += 1;
+    }
+    if (commit.mergeIncludesExternalAuthor) {
+      summary.externalAuthorMergeCount += 1;
+    }
+  }
+
+  return Array.from(summaries.entries())
+    .map(([repository, summary]) => ({
+      repository,
+      ...summary,
+      featureBranchScanEnabled,
+    }))
     .sort((left, right) => left.repository.localeCompare(right.repository));
 }
 

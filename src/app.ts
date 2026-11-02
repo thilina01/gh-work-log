@@ -1,14 +1,15 @@
-import { buildRunResult } from "./aggregation";
+import { buildCommitRecords, buildRunResult } from "./aggregation";
 import { enrichAssociatedPullRequests } from "./github/associated-pulls";
 import { GitHubClient } from "./github/client";
 import { GitHubClientLike } from "./github/client-interface";
 import { scanRepository } from "./app/scan-repository";
 import { toFailure } from "./app/failure";
+import { limitGitHubClient } from "./app/limited-client";
 import { Logger } from "./logger";
 import {
   AssociatedPullRequest,
   CommandRunner,
-  CommitObservation,
+  CommitRecord,
   FailureRecord,
   NormalizedConfig,
   RepositoryRecord,
@@ -16,7 +17,7 @@ import {
   SkipRecord,
 } from "./types";
 import { createSemaphore, mapLimit } from "./utils/async";
-import { groupBy, parseRepositoryShaKey, repositoryShaKey } from "./utils/collections";
+import { repositoryShaKey } from "./utils/collections";
 import { toErrorMessage } from "./utils/errors";
 import { writeFileEnsuringDir } from "./utils/files";
 
@@ -35,9 +36,10 @@ export async function runApp(
   dependencies: AppDependencies = {},
 ): Promise<RunResult> {
   const logger = dependencies.logger ?? new Logger(config.verbose);
-  const client: GitHubClientLike =
+  const rawClient: GitHubClientLike =
     dependencies.client ??
     new GitHubClient(config, logger, dependencies.commandRunner);
+  const client = limitGitHubClient(rawClient, createSemaphore(config.concurrency));
   const now = dependencies.now ?? (() => Date.now());
   const writeJson = dependencies.writeJson ?? defaultWriteJson;
   const startedAtMs = now();
@@ -91,7 +93,6 @@ export async function runApp(
     return result;
   }
 
-  const scanSemaphore = createSemaphore(config.concurrency);
   const scanResults = await mapLimit(
     filtered.scannable,
     config.concurrency,
@@ -102,7 +103,6 @@ export async function runApp(
         repository,
         targetIdentity,
         logger,
-        scanSemaphore,
       }),
   );
 
@@ -110,16 +110,73 @@ export async function runApp(
   const failures = scanResults.flatMap((result) => result.failures);
   const dynamicSkips = scanResults.flatMap((result) => result.skippedRepositories);
 
-  if (config.includeDiffStats && observations.length > 0) {
-    logger.info("Enriching diff statistics");
-    const diffFailures = await enrichDiffStats(
-      observations,
-      repositoryMap,
-      client,
-      config.concurrency,
-      logger,
+  if (config.enrichPrs && observations.length > 0) {
+    logger.info("Enriching associated pull requests");
+  }
+  const commits = buildCommitRecords(observations, repositoryMap, config);
+  const commitsNeedingDiffStats = commits.filter(
+    (commit) =>
+      commit.additions === undefined ||
+      commit.deletions === undefined ||
+      commit.filesChanged === undefined,
+  );
+  if (config.includeDiffStats && commitsNeedingDiffStats.length > 0) {
+    logger.info(
+      `Fetching diff statistics for ${commitsNeedingDiffStats.length} commits`,
     );
-    failures.push(...diffFailures);
+  }
+  const pullEnrichment =
+    config.enrichPrs && commits.length > 0
+      ? enrichAssociatedPullRequests({
+        commits,
+        repositoryMap,
+        client: {
+          getAssociatedPullRequests:
+            client.getAssociatedPullRequests?.bind(client) ??
+            (async () => [] as AssociatedPullRequest[]),
+        },
+        concurrency: config.concurrency,
+        onError: (repository, sha, error) => {
+          logger.info(
+            `Associated PR lookup failed for ${repository}@${sha}: ${toErrorMessage(error)}`,
+          );
+        },
+      })
+      : Promise.resolve(undefined);
+  const diffEnrichment =
+    config.includeDiffStats && commitsNeedingDiffStats.length > 0
+      ? enrichDiffStats(
+          commitsNeedingDiffStats,
+          repositoryMap,
+          client,
+          config.concurrency,
+          logger,
+        )
+      : Promise.resolve([]);
+  const [diffFailures, enrichedCommits] = await Promise.all([
+    diffEnrichment,
+    pullEnrichment,
+  ]);
+  failures.push(...diffFailures);
+
+  if (enrichedCommits) {
+    const commitsByKey = new Map(
+      commits.map((commit) => [
+        repositoryShaKey(commit.repository, commit.sha),
+        commit,
+      ]),
+    );
+    for (const enrichedCommit of enrichedCommits) {
+      if (!enrichedCommit.associatedPullRequests) {
+        continue;
+      }
+      const commit = commitsByKey.get(
+        repositoryShaKey(enrichedCommit.repository, enrichedCommit.sha),
+      );
+      if (commit) {
+        commit.associatedPullRequests = enrichedCommit.associatedPullRequests;
+      }
+    }
   }
 
   const result = buildRunResult({
@@ -135,25 +192,8 @@ export async function runApp(
     failures,
     startedAtMs,
     endedAtMs: now(),
+    commits,
   });
-
-  if (config.enrichPrs && result.data.length > 0) {
-    logger.info("Enriching associated pull requests");
-    const lookup =
-      client.getAssociatedPullRequests?.bind(client) ??
-      (async () => [] as AssociatedPullRequest[]);
-    result.data = await enrichAssociatedPullRequests({
-      commits: result.data,
-      repositoryMap,
-      client: { getAssociatedPullRequests: lookup },
-      concurrency: config.concurrency,
-      onError: (repository, sha, error) => {
-        logger.info(
-          `Associated PR lookup failed for ${repository}@${sha}: ${toErrorMessage(error)}`,
-        );
-      },
-    });
-  }
 
   await writeJson(config.outputPath, result);
   logger.info(
@@ -252,35 +292,28 @@ export function filterRepositories(
 }
 
 async function enrichDiffStats(
-  observations: CommitObservation[],
+  commits: CommitRecord[],
   repositoryMap: Map<string, RepositoryRecord>,
   client: GitHubClientLike,
   concurrency: number,
   logger: Logger,
 ): Promise<FailureRecord[]> {
   const failures: FailureRecord[] = [];
-  const grouped = groupBy(observations, (observation) =>
-    repositoryShaKey(observation.repository, observation.sha),
-  );
 
-  const entries = Array.from(grouped.entries());
-  await mapLimit(entries, concurrency, async ([key, group]) => {
-    const { repository: repositoryName, sha } = parseRepositoryShaKey(key);
-    const repository = repositoryMap.get(repositoryName);
-    if (!repository || !sha) {
+  await mapLimit(commits, concurrency, async (commit) => {
+    const repository = repositoryMap.get(commit.repository);
+    if (!repository) {
       return;
     }
 
     try {
-      const stats = await client.getCommitDiffStats(repository, sha);
-      for (const observation of group) {
-        observation.additions = stats.additions;
-        observation.deletions = stats.deletions;
-        observation.filesChanged = stats.filesChanged;
-      }
+      const stats = await client.getCommitDiffStats(repository, commit.sha);
+      commit.additions = stats.additions;
+      commit.deletions = stats.deletions;
+      commit.filesChanged = stats.filesChanged;
     } catch (error) {
-      logger.debug(`Diff-stat enrichment failed for ${repositoryName}@${sha}`);
-      failures.push(toFailure(error, repositoryName, "diff_stats"));
+      logger.debug(`Diff-stat enrichment failed for ${commit.repository}@${commit.sha}`);
+      failures.push(toFailure(error, commit.repository, "diff_stats"));
     }
   });
 
