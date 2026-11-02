@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  buildEffectiveConfigSnapshot,
   loadLocalConfigFile,
   mergeCliOptions,
   normalizeConfig,
@@ -94,6 +95,7 @@ describe("config parsing", () => {
         "2026-04-01",
         "--output",
         "./report.json",
+        "--no-scan-feature-branches",
         "--exclude-repo",
         "org/service",
       ]),
@@ -102,12 +104,90 @@ describe("config parsing", () => {
 
     const config = normalizeConfig(merged);
     expect(config.excludeOrgs).toEqual(["OTR-LANKA"]);
-    expect(config.excludeRepos).toEqual([
-      "org/service",
-      "thilina01/spring-seed",
-    ]);
+    expect(config.excludeRepos).toEqual(["org/service"]);
     expect(config.emails).toEqual(["me@example.com"]);
-    expect(config.scanFeatureBranches).toBe(true);
+    expect(config.scanFeatureBranches).toBe(false);
+  });
+
+  it("uses repeatable CLI list values as overrides for local list defaults", () => {
+    const options = parseCliArgs([
+      "--since",
+      "2026-03-01",
+      "--until",
+      "2026-04-01",
+      "--include-org",
+      "cli-one",
+      "--include-org=cli-two",
+    ]);
+
+    const merged = mergeCliOptions(options, {
+      includeOrgs: ["local-org"],
+      includeRepos: ["local/repo"],
+    });
+
+    expect(merged.includeOrgs).toEqual(["cli-one", "cli-two"]);
+    expect(merged.includeRepos).toEqual(["local/repo"]);
+  });
+
+  it("accepts generic negated boolean flags", () => {
+    const options = parseCliArgs([
+      "--since",
+      "2026-03-01",
+      "--until",
+      "2026-04-01",
+      "--no-scan-feature-branches",
+      "--no-include-diff-stats",
+    ]);
+
+    expect(options.scanFeatureBranches).toBe(false);
+    expect(options.includeDiffStats).toBe(false);
+    expect(() => parseCliArgs(["--no-not-a-flag"])).toThrow(
+      'Unknown flag "--no-not-a-flag".',
+    );
+  });
+
+  it("loads an explicitly selected config file and errors when it is missing", () => {
+    const fixtureDir = mkdtempSync(path.join(tmpdir(), "gh-work-log-config-path-"));
+    const filePath = path.join(fixtureDir, "settings.json");
+    writeFileSync(filePath, JSON.stringify({ includeOrgs: ["org"] }));
+
+    expect(loadLocalConfigFile(fixtureDir, filePath, true)).toEqual({
+      includeOrgs: ["org"],
+    });
+    expect(() =>
+      loadLocalConfigFile(fixtureDir, path.join(fixtureDir, "missing.json"), true),
+    ).toThrow(`Configuration file not found: ${path.join(fixtureDir, "missing.json")}`);
+  });
+
+  it("builds a normalized config preview with source information and redacted emails", () => {
+    const localConfig = { scanFeatureBranches: true, emails: ["private@example.com"] };
+    const options = mergeCliOptions(
+      parseCliArgs([
+        "--since",
+        "2026-03-01",
+        "--until",
+        "2026-04-01",
+        "--no-scan-feature-branches",
+        "--show-config",
+      ]),
+      localConfig,
+    );
+    const snapshot = buildEffectiveConfigSnapshot({
+      config: normalizeConfig(options),
+      options,
+      localConfig,
+      configFilePath: "/tmp/settings.json",
+      configFileLoaded: true,
+    });
+
+    expect(snapshot.values.scanFeatureBranches).toBe(false);
+    expect(snapshot.sources.scanFeatureBranches).toBe("command line");
+    expect(snapshot.sources.emails).toBe("local config");
+    expect(snapshot.values.emails).toEqual({
+      count: 1,
+      values: ["<redacted>"],
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("private@example.com");
   });
 
   it("defaults profile to operator and accepts valid profile values", () => {

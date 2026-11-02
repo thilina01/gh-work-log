@@ -188,6 +188,7 @@ Required flags:
 Output:
 
 - `--output`: JSON output path; defaults to `tmp/report-<since>-<until>.json` when omitted
+- `--config`: load local defaults from a JSON file (defaults to `.gh-work-log.local.json` in the current working directory)
 
 Identity:
 
@@ -222,11 +223,14 @@ Optional enrichments and execution flags:
 - `--classify-messages`
 - `--enrich-prs`: attach associated pull request number/url/title/state (inspection hint only; default off)
 - `--ignore-local-config`: ignore `.gh-work-log.local.json` and use CLI flags only
+- `--show-config`: print the effective normalized configuration and exit without contacting GitHub
 - `--dry-run`
 - `--html`: also render the HTML dashboard right after the JSON is written, using the same base name as `--output`
 - `--profile`: report packaging profile — `operator` (default), `management`, or `agent`
 - `--verbose`
 - `--help`
+
+Boolean flags also accept a `--no-<flag>` form. For example, `--no-scan-feature-branches` overrides `"scanFeatureBranches": true` in a config file. For a setting supplied from multiple sources, precedence is built-in default < local config < CLI. CLI list options replace the corresponding local list when supplied; repeated CLI list flags still collect multiple values. `--config` and `--ignore-local-config` cannot be used together.
 
 When a local checkout’s `src/` is newer than `dist/cli.js`, the CLI prints a stderr warning recommending `npm run build`. The scan still runs; callers such as profile refresh should stop and rebuild rather than trusting a stale build.
 
@@ -280,7 +284,11 @@ node dist/cli.js \
 
 ## Local Config File
 
-The CLI can load a personal defaults file named `.gh-work-log.local.json` from the current working directory. This is useful when you always want to skip the same orgs or repositories without repeating those flags in every command.
+The CLI loads `.gh-work-log.local.json` from the current working directory by default. Relative paths passed to `--config` are also resolved from the current working directory; absolute paths are accepted. Use this for reusable identity, repository-filter, branch-scan, and report defaults. An explicitly selected missing config file is an error, while a missing default file is ignored.
+
+Precedence is built-in defaults < local config < CLI. A CLI scalar or boolean overrides the local value; use `--no-<flag>` to explicitly turn off a boolean enabled in the file. A CLI list replaces that setting's local list, while repeated CLI flags and comma-separated values build the CLI list. Use `--ignore-local-config` to bypass the default file; it cannot be combined with `--config`.
+
+Run `--show-config` with the required date range to inspect the normalized settings and their source before scanning. This exits without contacting GitHub. Email values are redacted in the preview.
 
 Most users will not need to set `author` here, because the tool already defaults to the authenticated `gh` login. Keep `author` only if you intentionally want a persistent override.
 
@@ -308,6 +316,10 @@ Not supported in the local config file:
 - `output`
 - `dryRun`
 - `html`
+- `enrichPrs`
+- `ignoreLocalConfig`
+- `config`
+- `showConfig`
 - `help`
 
 Example:
@@ -319,11 +331,24 @@ Example:
   "emails": ["me@example.com"],
   "branchPatterns": ["glob:feature/*"],
   "scanFeatureBranches": true,
-  "detectWip": true
+  "detectWip": true,
+  "includeDiffStats": true,
+  "profile": "management"
 }
 ```
 
 There is also a tracked example file at [.gh-work-log.local.example.json](.gh-work-log.local.example.json).
+
+Example preview:
+
+```bash
+node dist/cli.js \
+  --since 2026-03-01 \
+  --until 2026-04-01 \
+  --config ./settings.json \
+  --no-scan-feature-branches \
+  --show-config
+```
 
 ## Scan Semantics
 

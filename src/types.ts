@@ -15,6 +15,7 @@ export interface CliOptions {
   since?: string;
   until?: string;
   output?: string;
+  configFile?: string;
   author?: string;
   emails: string[];
   includeOrgs: string[];
@@ -32,8 +33,10 @@ export interface CliOptions {
   verbose: boolean;
   dryRun: boolean;
   html: boolean;
+  showConfig: boolean;
   help: boolean;
   profile?: string;
+  explicitOptions?: Set<string>;
 }
 
 export interface LocalConfigFile {

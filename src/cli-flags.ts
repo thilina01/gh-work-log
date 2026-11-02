@@ -70,6 +70,13 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     helpText: `Output JSON path (default: ${DEFAULT_OUTPUT_DIR}/report-<since>-<until>.json)`,
   },
   {
+    flag: "--config",
+    kind: "single",
+    cliKey: "configFile",
+    helpSection: "Output",
+    helpText: `Load defaults from a JSON file (default: ${DEFAULT_LOCAL_CONFIG_FILE})`,
+  },
+  {
     flag: "--author",
     kind: "single",
     cliKey: "author",
@@ -216,6 +223,13 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
     cliKey: "help",
     helpSection: "Execution",
     helpText: "Show this help text",
+  },
+  {
+    flag: "--show-config",
+    kind: "boolean",
+    cliKey: "showConfig",
+    helpSection: "Execution",
+    helpText: "Print merged, normalized settings and exit without scanning",
   },
 ];
 

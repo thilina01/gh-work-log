@@ -43,7 +43,9 @@ export function parseCliArgs(argv: string[]): CliOptions {
     verbose: false,
     dryRun: false,
     html: false,
+    showConfig: false,
     help: false,
+    explicitOptions: new Set<string>(),
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -60,6 +62,15 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
     if (BOOLEAN_FLAGS.has(flag)) {
       setBooleanFlag(options, flag);
+      continue;
+    }
+
+    if (flag.startsWith("--no-")) {
+      const positiveFlag = `--${flag.slice("--no-".length)}`;
+      if (!BOOLEAN_FLAGS.has(positiveFlag) || inlineValue !== undefined) {
+        throw new Error(`Unknown flag "${flag}".`);
+      }
+      setBooleanFlag(options, positiveFlag, false);
       continue;
     }
 
@@ -89,9 +100,13 @@ export function parseCliArgs(argv: string[]): CliOptions {
 export function loadLocalConfigFile(
   cwd: string = process.cwd(),
   fileName: string = DEFAULT_LOCAL_CONFIG_FILE,
+  mustExist = false,
 ): LocalConfigFile {
-  const filePath = path.join(cwd, fileName);
+  const filePath = path.resolve(cwd, fileName);
   if (!fs.existsSync(filePath)) {
+    if (mustExist) {
+      throw new Error(`Configuration file not found: ${filePath}`);
+    }
     return {};
   }
 
@@ -116,6 +131,7 @@ export function mergeCliOptions(
   localConfig: LocalConfigFile,
 ): CliOptions {
   const merged: CliOptions = { ...cliOptions };
+  const explicitOptions = cliOptions.explicitOptions ?? new Set<string>();
 
   for (const definition of FLAG_DEFINITIONS) {
     if (!definition.localConfigKey) {
@@ -123,7 +139,13 @@ export function mergeCliOptions(
     }
 
     const localValue = localConfig[definition.localConfigKey];
-    if (localValue === undefined) {
+    const cliValue = cliOptions[definition.cliKey];
+    const cliWasProvided =
+      explicitOptions.has(definition.cliKey) ||
+      (definition.kind === "list" && Array.isArray(cliValue) && cliValue.length > 0) ||
+      (definition.kind === "boolean" && cliValue === true) ||
+      (definition.kind === "single" && cliValue !== undefined);
+    if (localValue === undefined || cliWasProvided) {
       continue;
     }
 
@@ -131,15 +153,12 @@ export function mergeCliOptions(
       if (!Array.isArray(localValue)) {
         throw new Error(`Invalid local configuration value for ${definition.localConfigKey}.`);
       }
-      merged[definition.cliKey] = [
-        ...localValue,
-        ...cliOptions[definition.cliKey],
-      ];
+      merged[definition.cliKey] = [...localValue];
     } else if (definition.kind === "boolean") {
       if (typeof localValue !== "boolean") {
         throw new Error(`Invalid local configuration value for ${definition.localConfigKey}.`);
       }
-      merged[definition.cliKey] = localValue || cliOptions[definition.cliKey];
+      merged[definition.cliKey] = localValue;
     } else {
       if (typeof localValue !== "string") {
         throw new Error(`Invalid local configuration value for ${definition.localConfigKey}.`);
@@ -149,6 +168,76 @@ export function mergeCliOptions(
   }
 
   return merged;
+}
+
+export function buildEffectiveConfigSnapshot(params: {
+  config: NormalizedConfig;
+  options: CliOptions;
+  localConfig: LocalConfigFile;
+  configFilePath: string | null;
+  configFileLoaded: boolean;
+}): {
+  configFile: { path: string | null; loaded: boolean };
+  values: Record<string, unknown>;
+  sources: Record<string, string>;
+} {
+  const { config, options, localConfig } = params;
+  const sources: Record<string, string> = {};
+  const explicitOptions = options.explicitOptions ?? new Set<string>();
+
+  for (const definition of FLAG_DEFINITIONS) {
+    if (definition.cliKey === "showConfig" || definition.cliKey === "help") {
+      continue;
+    }
+
+    sources[definition.cliKey] = explicitOptions.has(definition.cliKey)
+      ? "command line"
+      : definition.localConfigKey &&
+          localConfig[definition.localConfigKey] !== undefined
+        ? "local config"
+        : "default";
+  }
+
+  return {
+    configFile: {
+      path: params.configFilePath,
+      loaded: params.configFileLoaded,
+    },
+    values: {
+      since: config.sinceIso,
+      until: config.untilIso,
+      output: config.outputPath,
+      author: config.requestedAuthor ?? "authenticated GitHub user",
+      emails: {
+        count: config.emails.length,
+        values: config.emails.map(() => "<redacted>"),
+      },
+      includeOrgs: config.includeOrgs,
+      excludeOrgs: config.excludeOrgs,
+      includeRepos: config.includeRepos,
+      excludeRepos: config.excludeRepos,
+      ownedOnly: config.ownedOnly,
+      scanFeatureBranches: config.scanFeatureBranches,
+      branchPatterns: config.branchPatterns.map((pattern) => pattern.input),
+      includeDiffStats: config.includeDiffStats,
+      detectWip: config.detectWip,
+      classifyMessages: config.classifyMessages,
+      enrichPrs: config.enrichPrs,
+      ignoreLocalConfig: config.ignoreLocalConfig,
+      dryRun: config.dryRun,
+      html: options.html,
+      profile: config.profile,
+      verbose: config.verbose,
+      concurrency: config.concurrency,
+      retryPolicy: config.retryPolicy,
+    },
+    sources: {
+      ...sources,
+      configFile: options.configFile ? "command line" : "default",
+      concurrency: "built-in",
+      retryPolicy: "built-in",
+    },
+  };
 }
 
 export function normalizeConfig(options: CliOptions): NormalizedConfig {
@@ -219,6 +308,7 @@ export function renderHelp(): string {
   const lines: string[] = [
     "Usage: gh-work-log --since <iso|date> --until <iso|date> [--output <file>] [options]",
     `Optional local defaults: ${DEFAULT_LOCAL_CONFIG_FILE}`,
+    "Boolean flags also accept --no-<flag> to override a local true value.",
   ];
 
   for (const section of HELP_SECTION_ORDER) {
@@ -255,13 +345,18 @@ function normalizeList(values: string[]): string[] {
   );
 }
 
-function setBooleanFlag(options: CliOptions, flag: string): void {
+function setBooleanFlag(
+  options: CliOptions,
+  flag: string,
+  value = true,
+): void {
   const definition = FLAG_BY_TOKEN.get(flag);
   if (definition?.kind !== "boolean") {
     throw new Error(`Unknown boolean flag "${flag}".`);
   }
 
-  options[definition.cliKey] = true;
+  options[definition.cliKey] = value;
+  options.explicitOptions?.add(definition.cliKey);
 }
 
 function setSingleValueFlag(
@@ -275,6 +370,7 @@ function setSingleValueFlag(
   }
 
   options[definition.cliKey] = value;
+  options.explicitOptions?.add(definition.cliKey);
 }
 
 function setListValueFlag(options: CliOptions, flag: string, value: string): void {
@@ -284,6 +380,7 @@ function setListValueFlag(options: CliOptions, flag: string, value: string): voi
   }
 
   options[definition.cliKey].push(value);
+  options.explicitOptions?.add(definition.cliKey);
 }
 
 function validateLocalConfigFile(

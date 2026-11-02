@@ -9,6 +9,7 @@ const ALL_CLI_OPTION_KEYS: Record<keyof CliOptions, true> = {
   since: true,
   until: true,
   output: true,
+  configFile: true,
   author: true,
   emails: true,
   includeOrgs: true,
@@ -26,14 +27,19 @@ const ALL_CLI_OPTION_KEYS: Record<keyof CliOptions, true> = {
   verbose: true,
   dryRun: true,
   html: true,
+  showConfig: true,
   profile: true,
   help: true,
+  explicitOptions: true,
 };
 
 describe("FLAG_DEFINITIONS stays in sync with CliOptions", () => {
   it("has exactly one definition per CliOptions field", () => {
     const registeredKeys = new Set(FLAG_DEFINITIONS.map((definition) => definition.cliKey));
 
-    expect(registeredKeys).toEqual(new Set(Object.keys(ALL_CLI_OPTION_KEYS)));
+    const optionKeys = Object.keys(ALL_CLI_OPTION_KEYS).filter(
+      (key) => key !== "explicitOptions",
+    );
+    expect(registeredKeys).toEqual(new Set(optionKeys));
   });
 });
