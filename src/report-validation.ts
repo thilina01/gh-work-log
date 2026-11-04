@@ -18,8 +18,10 @@ export function parseRunResult(value: unknown): RunResult {
   const metadata = record(report.metadata, "metadata");
   const statistics = record(report.statistics, "statistics");
 
-  literal(metadata.schemaVersion, ["1.2.0", "1.3.0", "1.4.0"], "metadata.schemaVersion");
-  if (metadata.schemaVersion === "1.3.0" || metadata.schemaVersion === "1.4.0") {
+  literal(metadata.schemaVersion, ["1.2.0", "1.3.0", "1.4.0", "1.5.0"], "metadata.schemaVersion");
+  const schemaAtLeast14 = metadata.schemaVersion === "1.4.0" || metadata.schemaVersion === "1.5.0";
+  const isSchema15 = metadata.schemaVersion === "1.5.0";
+  if (metadata.schemaVersion === "1.3.0" || schemaAtLeast14) {
     literal(metadata.reportMode, ["author", "organization"], "metadata.reportMode");
   } else if (metadata.reportMode !== undefined) {
     literal(metadata.reportMode, ["author", "organization"], "metadata.reportMode");
@@ -49,6 +51,16 @@ export function parseRunResult(value: unknown): RunResult {
     "dryRun",
   ]) {
     boolean(metadata[key], `metadata.${key}`);
+  }
+  if (isSchema15) {
+    boolean(metadata.enrichTasks, "metadata.enrichTasks");
+  } else if (metadata.enrichTasks !== undefined) {
+    throw new Error("Invalid report: metadata.enrichTasks requires schema 1.5.0.");
+  }
+  if (metadata.enrichTasks === true) {
+    literal(metadata.taskDetail, ["none", "summary", "full"], "metadata.taskDetail");
+  } else if (metadata.taskDetail !== undefined) {
+    throw new Error("Invalid report: metadata.taskDetail is only valid when metadata.enrichTasks is true.");
   }
   assertLiteral(metadata.filterField, "authoredDateTime", "metadata.filterField");
   assertLiteral(metadata.wipDetectionIsHeuristic, true, "metadata.wipDetectionIsHeuristic");
@@ -139,18 +151,237 @@ export function parseRunResult(value: unknown): RunResult {
       number(failure.statusCode, `failures[${index}].statusCode`);
     }
   }
-  const isOrganizationSchema14 =
-    metadata.schemaVersion === "1.4.0" && metadata.reportMode === "organization";
-  const isAuthorSchema14 =
-    metadata.schemaVersion === "1.4.0" && metadata.reportMode === "author";
+  const isOrganizationSchema14 = schemaAtLeast14 && metadata.reportMode === "organization";
+  const isAuthorSchema14 = schemaAtLeast14 && metadata.reportMode === "author";
+  const expectWorkTracking = metadata.enrichTasks === true && metadata.dryRun === false;
+  if (expectWorkTracking && report.workTracking === undefined) {
+    throw new Error("Invalid report: expected workTracking when metadata.enrichTasks is true.");
+  }
+  if (!expectWorkTracking && report.workTracking !== undefined) {
+    throw new Error("Invalid report: workTracking is only valid when metadata.enrichTasks is true.");
+  }
+  const workTracking = expectWorkTracking ? validateWorkTracking(report.workTracking) : null;
   for (const [index, item] of array(report.data, "data").entries()) {
     validateCommit(item, `data[${index}]`, {
       requireAuthorName: isOrganizationSchema14,
       forbidAuthorName: isAuthorSchema14,
+      workTracking,
     });
   }
 
   return value as RunResult;
+}
+
+const WORK_LINK_SOURCES = ["merge_sha", "pr_closing_ref", "pr_trailer", "pr_branch", "branch_name"];
+const WORK_UNLINKED_REASONS = [
+  "out_of_scope_repository",
+  "exempt_repository",
+  "no_pull_request",
+  "pull_request_without_task",
+  "lookup_failed",
+];
+
+interface WorkTrackingKeys {
+  tasks: Set<string>;
+  subIssues: Set<string>;
+}
+
+function validateWorkTracking(value: unknown): WorkTrackingKeys {
+  const path = "workTracking";
+  const section = record(value, path);
+  const board = record(section.board, `${path}.board`);
+  for (const key of ["owner", "title", "url", "snapshotAt"]) {
+    string(board[key], `${path}.board.${key}`);
+  }
+  number(board.number, `${path}.board.number`);
+  number(board.itemCount, `${path}.board.itemCount`);
+  literal(section.taskDetail, ["none", "summary", "full"], `${path}.taskDetail`);
+  validateWorkTrackingSettings(section.settings, `${path}.settings`);
+
+  const coverage = record(section.coverage, `${path}.coverage`);
+  for (const key of ["commits", "linked", "unlinked"]) {
+    number(coverage[key], `${path}.coverage.${key}`);
+  }
+  const bySource = record(coverage.linkedBySource, `${path}.coverage.linkedBySource`);
+  for (const key of WORK_LINK_SOURCES) {
+    number(bySource[key], `${path}.coverage.linkedBySource.${key}`);
+  }
+  const byReason = record(coverage.unlinkedByReason, `${path}.coverage.unlinkedByReason`);
+  for (const key of WORK_UNLINKED_REASONS) {
+    number(byReason[key], `${path}.coverage.unlinkedByReason.${key}`);
+  }
+
+  const tasks = record(section.tasks, `${path}.tasks`);
+  const subIssues = record(section.subIssues, `${path}.subIssues`);
+  const pullRequests = record(section.pullRequests, `${path}.pullRequests`);
+
+  for (const [key, item] of Object.entries(tasks)) {
+    const taskPath = `${path}.tasks["${key}"]`;
+    const task = record(item, taskPath);
+    validateIssueCore(task, key, taskPath);
+    for (const field of ["stateReason", "issueType", "milestone", "status"]) {
+      nullableString(task[field], `${taskPath}.${field}`);
+    }
+    boolean(task.onBoard, `${taskPath}.onBoard`);
+    stringArray(task.labels, `${taskPath}.labels`);
+    fieldRecord(task.boardFields, `${taskPath}.boardFields`);
+    fieldRecord(task.issueFields, `${taskPath}.issueFields`);
+    for (const field of ["fields", "sections"]) {
+      if (task[field] !== undefined) {
+        stringRecord(task[field], `${taskPath}.${field}`);
+      }
+    }
+    if (task.body !== undefined) {
+      string(task.body, `${taskPath}.body`);
+    }
+    stringArray(task.subIssues, `${taskPath}.subIssues`);
+    stringArray(task.pullRequests, `${taskPath}.pullRequests`);
+    stringArray(task.completeness, `${taskPath}.completeness`);
+    for (const [index, subIssue] of array(task.subIssues, `${taskPath}.subIssues`).entries()) {
+      if (subIssues[subIssue as string] === undefined) {
+        throw new Error(`Invalid report: ${taskPath}.subIssues[${index}] does not reference a sub-issue record.`);
+      }
+    }
+    for (const [index, pull] of array(task.pullRequests, `${taskPath}.pullRequests`).entries()) {
+      if (pullRequests[pull as string] === undefined) {
+        throw new Error(`Invalid report: ${taskPath}.pullRequests[${index}] does not reference a pull request record.`);
+      }
+    }
+    if (task.activity !== null) {
+      const activityPath = `${taskPath}.activity`;
+      const activity = record(task.activity, activityPath);
+      number(activity.commitCount, `${activityPath}.commitCount`);
+      stringArray(activity.repositories, `${activityPath}.repositories`);
+      string(activity.firstCommitAt, `${activityPath}.firstCommitAt`);
+      string(activity.lastCommitAt, `${activityPath}.lastCommitAt`);
+      for (const field of ["additions", "deletions"]) {
+        if (activity[field] !== undefined) {
+          number(activity[field], `${activityPath}.${field}`);
+        }
+      }
+      for (const [index, entry] of array(activity.authors, `${activityPath}.authors`).entries()) {
+        const author = record(entry, `${activityPath}.authors[${index}]`);
+        nullableString(author.login, `${activityPath}.authors[${index}].login`);
+        number(author.commitCount, `${activityPath}.authors[${index}].commitCount`);
+      }
+    }
+  }
+
+  for (const [key, item] of Object.entries(subIssues)) {
+    const subPath = `${path}.subIssues["${key}"]`;
+    const subIssue = record(item, subPath);
+    validateIssueCore(subIssue, key, subPath);
+    nullableString(subIssue.stateReason, `${subPath}.stateReason`);
+    nullableString(subIssue.status, `${subPath}.status`);
+    boolean(subIssue.onBoard, `${subPath}.onBoard`);
+    string(subIssue.task, `${subPath}.task`);
+    string(subIssue.parent, `${subPath}.parent`);
+    if (tasks[subIssue.task as string] === undefined) {
+      throw new Error(`Invalid report: ${subPath}.task does not reference a task record.`);
+    }
+    stringArray(subIssue.closingPullRequests, `${subPath}.closingPullRequests`);
+    if (subIssue.body !== undefined) {
+      string(subIssue.body, `${subPath}.body`);
+    }
+  }
+
+  for (const [key, item] of Object.entries(pullRequests)) {
+    const pullPath = `${path}.pullRequests["${key}"]`;
+    const pull = record(item, pullPath);
+    for (const field of ["key", "repository", "title", "url", "state", "createdAt", "headRefName", "baseRefName"]) {
+      string(pull[field], `${pullPath}.${field}`);
+    }
+    if (pull.key !== key) {
+      throw new Error(`Invalid report: ${pullPath}.key does not match its record key.`);
+    }
+    for (const field of ["mergedAt", "closedAt", "author", "mergedBy", "mergeCommitSha", "task", "subIssue"]) {
+      nullableString(pull[field], `${pullPath}.${field}`);
+    }
+    for (const field of ["number", "additions", "deletions", "changedFiles", "commitCount"]) {
+      number(pull[field], `${pullPath}.${field}`);
+    }
+    boolean(pull.isDraft, `${pullPath}.isDraft`);
+    stringArray(pull.labels, `${pullPath}.labels`);
+    stringArray(pull.closingIssues, `${pullPath}.closingIssues`);
+    stringRecord(pull.trailers, `${pullPath}.trailers`);
+    if (pull.sections !== undefined) {
+      stringRecord(pull.sections, `${pullPath}.sections`);
+    }
+    for (const [index, entry] of array(pull.reviews, `${pullPath}.reviews`).entries()) {
+      const review = record(entry, `${pullPath}.reviews[${index}]`);
+      nullableString(review.author, `${pullPath}.reviews[${index}].author`);
+      string(review.state, `${pullPath}.reviews[${index}].state`);
+      nullableString(review.submittedAt, `${pullPath}.reviews[${index}].submittedAt`);
+    }
+  }
+
+  return { tasks: new Set(Object.keys(tasks)), subIssues: new Set(Object.keys(subIssues)) };
+}
+
+function validateWorkTrackingSettings(value: unknown, path: string): void {
+  const settings = record(value, path);
+  const project = record(settings.project, `${path}.project`);
+  literal(project.ownerType, ["organization", "user"], `${path}.project.ownerType`);
+  string(project.owner, `${path}.project.owner`);
+  number(project.number, `${path}.project.number`);
+  for (const key of ["taskRepository", "branchTaskPattern", "taskTrailer", "subIssueTrailer"]) {
+    nullableString(settings[key], `${path}.${key}`);
+  }
+  for (const key of ["repositoryOwners", "exemptRepositories", "taskSections", "taskFields", "pullRequestSections"]) {
+    stringArray(settings[key], `${path}.${key}`);
+  }
+}
+
+function validateIssueCore(issue: JsonRecord, key: string, path: string): void {
+  for (const field of ["key", "repository", "title", "url", "state", "createdAt"]) {
+    string(issue[field], `${path}.${field}`);
+  }
+  if (issue.key !== key) {
+    throw new Error(`Invalid report: ${path}.key does not match its record key.`);
+  }
+  number(issue.number, `${path}.number`);
+  nullableString(issue.closedAt, `${path}.closedAt`);
+  stringArray(issue.assignees, `${path}.assignees`);
+}
+
+function validateWorkLink(value: unknown, path: string, keys: WorkTrackingKeys): void {
+  const link = record(value, path);
+  literal(link.status, ["linked", "unlinked"], `${path}.status`);
+  for (const field of ["task", "subIssue", "pullRequest"]) {
+    nullableString(link[field], `${path}.${field}`);
+  }
+  if (link.status === "linked") {
+    literal(link.linkSource, WORK_LINK_SOURCES, `${path}.linkSource`);
+    literal(link.confidence, ["high", "medium"], `${path}.confidence`);
+    if (link.unlinkedReason !== null) {
+      throw new Error(`Invalid report: expected ${path}.unlinkedReason to be null for a linked commit.`);
+    }
+    if (typeof link.task !== "string" || !keys.tasks.has(link.task)) {
+      throw new Error(`Invalid report: ${path}.task does not reference a task record.`);
+    }
+    if (typeof link.subIssue === "string" && !keys.subIssues.has(link.subIssue)) {
+      throw new Error(`Invalid report: ${path}.subIssue does not reference a sub-issue record.`);
+    }
+  } else {
+    literal(link.unlinkedReason, WORK_UNLINKED_REASONS, `${path}.unlinkedReason`);
+    if (link.task !== null || link.subIssue !== null || link.linkSource !== null || link.confidence !== null) {
+      throw new Error(`Invalid report: ${path} is unlinked but names a task, sub-issue, source, or confidence.`);
+    }
+  }
+}
+
+function fieldRecord(value: unknown, path: string): void {
+  for (const [key, entry] of Object.entries(record(value, path))) {
+    if (typeof entry !== "string" && (typeof entry !== "number" || !Number.isFinite(entry))) {
+      throw new Error(`Invalid report: expected ${path}.${key} to be a string or number.`);
+    }
+  }
+}
+
+function stringRecord(value: unknown, path: string): void {
+  for (const [key, entry] of Object.entries(record(value, path))) {
+    string(entry, `${path}.${key}`);
+  }
 }
 
 function validateHighlights(value: unknown): void {
@@ -257,7 +488,11 @@ function validateMessageCategories(value: unknown, path: string): void {
 function validateCommit(
   value: unknown,
   path: string,
-  options: { requireAuthorName: boolean; forbidAuthorName: boolean },
+  options: {
+    requireAuthorName: boolean;
+    forbidAuthorName: boolean;
+    workTracking: WorkTrackingKeys | null;
+  },
 ): void {
   const commit = record(value, path);
   for (const key of [
@@ -299,6 +534,11 @@ function validateCommit(
     if (commit[key] !== undefined) {
       number(commit[key], `${path}.${key}`);
     }
+  }
+  if (options.workTracking) {
+    validateWorkLink(commit.workLink, `${path}.workLink`, options.workTracking);
+  } else if (commit.workLink !== undefined) {
+    throw new Error(`Invalid report: ${path}.workLink is only valid when metadata.enrichTasks is true.`);
   }
   if (commit.associatedPullRequests !== undefined) {
     for (const [index, item] of array(commit.associatedPullRequests, `${path}.associatedPullRequests`).entries()) {

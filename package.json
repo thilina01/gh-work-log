@@ -1,7 +1,7 @@
 {
   "name": "gh-work-log",
   "version": "1.0.0",
-  "description": "GitHub cross-repository commit aggregator built on top of gh auth and gh api.",
+  "description": "GitHub cross-repository commit aggregator built on top of gh auth and gh api, with optional linking of commits to GitHub Projects tasks.",
   "license": "MIT",
   "private": true,
   "type": "commonjs",

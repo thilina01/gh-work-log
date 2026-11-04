@@ -195,6 +195,29 @@ export const FLAG_DEFINITIONS: readonly FlagDefinition[] = [
       "Attach associated pull request number/url/title/state (inspection hint only)",
   },
   {
+    flag: "--enrich-tasks",
+    kind: "boolean",
+    cliKey: "enrichTasks",
+    localConfigKey: "enrichTasks",
+    helpSection: "Enrichment",
+    helpText: "Link commits to tasks on the GitHub Projects board in workTracking config",
+  },
+  {
+    flag: "--task-detail",
+    kind: "single",
+    cliKey: "taskDetail",
+    localConfigKey: "taskDetail",
+    helpSection: "Enrichment",
+    helpText: "Task and pull request text to keep: none, summary, or full (default: full)",
+  },
+  {
+    flag: "--work-tracking-config",
+    kind: "single",
+    cliKey: "workTrackingConfig",
+    helpSection: "Enrichment",
+    helpText: "Load the workTracking settings from a JSON file (allowed with --ignore-local-config)",
+  },
+  {
     flag: "--dry-run",
     kind: "boolean",
     cliKey: "dryRun",
@@ -262,8 +285,12 @@ export const LIST_FLAGS: ReadonlySet<string> = new Set(
   ),
 );
 
-export const LOCAL_CONFIG_ALLOWED_KEYS: ReadonlySet<string> = new Set(
-  FLAG_DEFINITIONS.flatMap((definition) =>
+/** Local config keys that are structured values with no matching CLI flag. */
+export const LOCAL_CONFIG_STRUCTURED_KEYS: ReadonlySet<string> = new Set(["workTracking"]);
+
+export const LOCAL_CONFIG_ALLOWED_KEYS: ReadonlySet<string> = new Set([
+  ...FLAG_DEFINITIONS.flatMap((definition) =>
     definition.localConfigKey ? [definition.localConfigKey] : [],
   ),
-);
+  ...LOCAL_CONFIG_STRUCTURED_KEYS,
+]);

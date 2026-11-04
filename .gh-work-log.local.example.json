@@ -4,5 +4,18 @@
   "excludeRepos": ["thilina01/spring-seed"],
   "branchPatterns": ["glob:feature/*", "prefix:release/"],
   "scanFeatureBranches": true,
-  "detectWip": true
+  "detectWip": true,
+  "enrichTasks": false,
+  "taskDetail": "full",
+  "workTracking": {
+    "projectOwner": "acme",
+    "projectNumber": 1,
+    "taskRepository": "acme/tasks",
+    "branchTaskPattern": "-wm(\\d+)-",
+    "taskTrailer": "Parent-Task",
+    "subIssueTrailer": "Implementation-Issue",
+    "taskFields": ["Requested by"],
+    "pullRequestSections": ["Summary", "Test plan"],
+    "exemptRepositories": ["acme/docs"]
+  }
 }

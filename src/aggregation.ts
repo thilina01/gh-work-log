@@ -17,6 +17,7 @@ import {
   TimeSeriesSummary,
 } from "./types";
 import { classifyMessage } from "./classification";
+import { WorkTrackingReport } from "./work-tracking/types";
 import { buildCandidateGroupHints } from "./hints/candidate-groups";
 import { classifySkipReason } from "./skip-taxonomy";
 import { readToolIdentity } from "./tool-identity";
@@ -37,6 +38,7 @@ export function buildRunResult(params: {
   startedAtMs: number;
   endedAtMs: number;
   commits?: CommitRecord[];
+  workTracking?: WorkTrackingReport;
 }): RunResult {
   const commits =
     params.commits ??
@@ -56,7 +58,7 @@ export function buildRunResult(params: {
 
   return {
     metadata: {
-      schemaVersion: "1.4.0",
+      schemaVersion: "1.5.0",
       reportMode: params.config.organizationReport ? "organization" : "author",
       generatedAt: new Date(params.endedAtMs).toISOString(),
       authenticatedUser: params.authenticatedUser,
@@ -73,6 +75,8 @@ export function buildRunResult(params: {
       includeDiffStats: params.config.includeDiffStats,
       classifyMessages: params.config.classifyMessages,
       enrichPrs: params.config.enrichPrs,
+      enrichTasks: params.config.enrichTasks,
+      ...(params.config.enrichTasks ? { taskDetail: params.config.taskDetail } : {}),
       ignoreLocalConfig: params.config.ignoreLocalConfig,
       dryRun: params.config.dryRun,
       profile: params.config.profile,
@@ -84,6 +88,7 @@ export function buildRunResult(params: {
     statistics,
     failures: sortFailures(params.failures),
     data: commits,
+    ...(params.workTracking ? { workTracking: params.workTracking } : {}),
   };
 }
 

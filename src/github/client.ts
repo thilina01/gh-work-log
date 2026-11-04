@@ -24,6 +24,27 @@ import {
   isDiffStatsResponse,
   isGraphqlCommitResponse,
 } from "./response-schemas";
+import { GitHubApiError } from "./api-error";
+import {
+  buildBoardQuery,
+  buildCommitPullRequestsBatchQuery,
+  buildIssuesBatchQuery,
+  buildPullRequestsBatchQuery,
+  mapBoardPage,
+  mapIssue,
+  mapPullRequest,
+  readAliased,
+  WorkTrackingPayloadError,
+} from "../work-tracking/graphql";
+import { parseIssueKey } from "../work-tracking/text";
+import { repositoryShaKey } from "../utils/collections";
+import {
+  CommitRef,
+  GhBoard,
+  GhIssue,
+  GhPullRequest,
+  WorkTrackingSettings,
+} from "../work-tracking/types";
 
 export { NodeCommandRunner } from "./command-runner";
 export { mapRepository } from "./repository-mapper";
@@ -245,6 +266,118 @@ export class GitHubClient {
     );
   }
 
+  public async getProjectBoard(project: WorkTrackingSettings["project"]): Promise<GhBoard> {
+    const items: GhBoard["items"] = [];
+    let after: string | null = null;
+    let title = "";
+    let url = "";
+
+    while (true) {
+      const response: Record<string, unknown> = await this.api.postGraphql(
+        buildBoardQuery(project.ownerType),
+        { owner: project.owner, number: project.number, after },
+        "work_tracking_board_failed",
+        isObject,
+      );
+      const page: ReturnType<typeof mapBoardPage> = mapWorkTrackingPayload(() =>
+        mapBoardPage(response),
+      );
+      title = page.title;
+      url = page.url;
+      items.push(...page.items);
+      if (!page.hasNextPage || !page.endCursor) {
+        break;
+      }
+      after = page.endCursor;
+    }
+
+    return { title, url, items };
+  }
+
+  public async getIssuesBatch(keys: string[]): Promise<Map<string, GhIssue | null>> {
+    const parsed = parseKeys(keys);
+    const result = new Map<string, GhIssue | null>(keys.map((key) => [key, null]));
+    if (parsed.length === 0) {
+      return result;
+    }
+    const { data } = await this.api.postGraphqlPartial(
+      buildIssuesBatchQuery(parsed),
+      {},
+      "work_tracking_issue_failed",
+      isObject,
+    );
+    parsed.forEach((key, index) => {
+      const issue = readAliased(data, `i${index}`, "issue");
+      if (issue) {
+        result.set(key.key, mapWorkTrackingPayload(() => mapIssue(issue, key.key)));
+      }
+    });
+    return result;
+  }
+
+  public async getPullRequestsBatch(keys: string[]): Promise<Map<string, GhPullRequest | null>> {
+    const parsed = parseKeys(keys);
+    const result = new Map<string, GhPullRequest | null>(keys.map((key) => [key, null]));
+    if (parsed.length === 0) {
+      return result;
+    }
+    const { data } = await this.api.postGraphqlPartial(
+      buildPullRequestsBatchQuery(parsed),
+      {},
+      "work_tracking_pull_request_failed",
+      isObject,
+    );
+    parsed.forEach((key, index) => {
+      const pull = readAliased(data, `p${index}`, "pullRequest");
+      if (pull) {
+        result.set(key.key, mapWorkTrackingPayload(() => mapPullRequest(pull, key.key)));
+      }
+    });
+    return result;
+  }
+
+  public async getCommitPullRequestsBatch(
+    commits: CommitRef[],
+  ): Promise<Map<string, GhPullRequest[]>> {
+    const result = new Map<string, GhPullRequest[]>();
+    if (commits.length === 0) {
+      return result;
+    }
+    const { data } = await this.api.postGraphqlPartial(
+      buildCommitPullRequestsBatchQuery(commits),
+      {},
+      "work_tracking_commit_pull_requests_failed",
+      isObject,
+    );
+    commits.forEach((commit, index) => {
+      const object = readAliased(data, `c${index}`, "object");
+      const connection =
+        object && typeof object === "object"
+          ? (object as Record<string, unknown>).associatedPullRequests
+          : null;
+      const nodes =
+        connection && typeof connection === "object"
+          ? (connection as Record<string, unknown>).nodes
+          : null;
+      const key = repositoryShaKey(commit.repository, commit.sha);
+      if (!Array.isArray(nodes)) {
+        if (object) {
+          result.set(key, []);
+        }
+        return;
+      }
+      result.set(
+        key,
+        mapWorkTrackingPayload(() =>
+          nodes
+            .filter((node) => node !== null)
+            .map((node, nodeIndex) => mapPullRequest(node, `${key}.pulls[${nodeIndex}]`)),
+        ),
+      );
+    });
+    return result;
+  }
+
   private async fetchCommitHistory(
     repository: RepositoryRecord,
     branch: string,
@@ -325,6 +458,33 @@ export class GitHubClient {
     return { observations, missingRef };
   }
 
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseKeys(keys: string[]): Array<{ key: string; repository: string; number: number }> {
+  return keys.flatMap((key) => {
+    const parsed = parseIssueKey(key);
+    return parsed ? [{ key, ...parsed }] : [];
+  });
+}
+
+function mapWorkTrackingPayload<T>(map: () => T): T {
+  try {
+    return map();
+  } catch (error) {
+    if (error instanceof WorkTrackingPayloadError) {
+      throw new GitHubApiError(
+        `GitHub returned an invalid work-tracking response: ${error.message}`,
+        "work_tracking_invalid_response",
+        undefined,
+        0,
+      );
+    }
+    throw error;
+  }
 }
 
 function buildCommitHistoryQuery(

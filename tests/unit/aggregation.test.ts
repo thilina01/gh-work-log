@@ -22,6 +22,9 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     detectWip: true,
     classifyMessages: true,
     enrichPrs: false,
+    enrichTasks: false,
+    taskDetail: "full",
+    workTracking: null,
     ignoreLocalConfig: false,
     verbose: false,
     dryRun: false,
@@ -197,7 +200,7 @@ describe("aggregation", () => {
       endedAtMs: Date.parse("2026-04-05T10:00:02.500Z"),
     });
 
-    expect(result.metadata.schemaVersion).toBe("1.4.0");
+    expect(result.metadata.schemaVersion).toBe("1.5.0");
     expect(result.metadata.profile).toBe("operator");
     expect(result.metadata.enrichPrs).toBe(false);
     expect(result.metadata.ignoreLocalConfig).toBe(false);
@@ -359,7 +362,7 @@ describe("aggregation", () => {
     });
 
     expect(result.metadata).toMatchObject({
-      schemaVersion: "1.4.0",
+      schemaVersion: "1.5.0",
       reportMode: "organization",
       targetAuthor: "All contributors",
     });

@@ -6,6 +6,7 @@ import {
   buildEffectiveConfigSnapshot,
   DEFAULT_LOCAL_CONFIG_FILE,
   loadLocalConfigFile,
+  loadWorkTrackingConfigFile,
   mergeCliOptions,
   normalizeConfig,
   parseCliArgs,
@@ -45,7 +46,15 @@ async function main(): Promise<void> {
         )
       : {};
     const options = mergeCliOptions(parsedOptions, localConfig);
-    const config = normalizeConfig(options);
+    // A --work-tracking-config file replaces the local config's workTracking
+    // block, and works with --ignore-local-config for reproducible scans.
+    const workTrackingConfigPath = options.workTrackingConfig
+      ? path.resolve(options.workTrackingConfig)
+      : null;
+    const workTracking = workTrackingConfigPath
+      ? loadWorkTrackingConfigFile(workTrackingConfigPath)
+      : localConfig.workTracking;
+    const config = normalizeConfig(options, workTracking);
 
     if (options.showConfig) {
       const snapshot = buildEffectiveConfigSnapshot({
@@ -54,6 +63,7 @@ async function main(): Promise<void> {
         localConfig,
         configFilePath,
         configFileLoaded: configFilePath !== null && fs.existsSync(configFilePath),
+        workTrackingConfigPath,
       });
       process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
       process.exitCode = 0;

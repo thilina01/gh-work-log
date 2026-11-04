@@ -20,6 +20,8 @@ import { createSemaphore, mapLimit } from "./utils/async";
 import { repositoryShaKey } from "./utils/collections";
 import { toErrorMessage } from "./utils/errors";
 import { writeFileEnsuringDir } from "./utils/files";
+import { enrichWorkTracking } from "./work-tracking/enrich";
+import { GhBoard, WorkTrackingClient, WorkTrackingReport } from "./work-tracking/types";
 
 export type { GitHubClientLike } from "./github/client-interface";
 
@@ -63,8 +65,23 @@ export async function runApp(
     logger.info(`Resolved target author ${targetIdentity.login}`);
   }
 
-  logger.info("Discovering repositories");
-  const discoveredRepositories = await client.listRepositories();
+  const workTrackingClient =
+    config.enrichTasks && !config.dryRun ? requireWorkTrackingClient(client) : null;
+  if (workTrackingClient && config.workTracking) {
+    logger.info(
+      `Discovering repositories and loading project board ${config.workTracking.project.owner}/${config.workTracking.project.number}`,
+    );
+  } else {
+    logger.info("Discovering repositories");
+  }
+  const [discoveredRepositories, board] = await Promise.all([
+    client.listRepositories(),
+    workTrackingClient ? loadBoard(workTrackingClient, config) : Promise.resolve(null),
+  ]);
+  const boardSnapshotAt = board ? new Date(now()).toISOString() : null;
+  if (board) {
+    logger.info(`Loaded ${board.items.length} issues from project board "${board.title}"`);
+  }
   const filtered = filterRepositories(
     discoveredRepositories,
     authenticatedUser.login,
@@ -185,6 +202,23 @@ export async function runApp(
     }
   }
 
+  let workTracking: WorkTrackingReport | undefined;
+  if (board && workTrackingClient && config.workTracking && boardSnapshotAt) {
+    const enrichment = await enrichWorkTracking({
+      commits,
+      board,
+      settings: config.workTracking,
+      taskDetail: config.taskDetail,
+      includeDiffStats: config.includeDiffStats,
+      client: workTrackingClient,
+      concurrency: config.concurrency,
+      snapshotAt: boardSnapshotAt,
+      logger,
+    });
+    failures.push(...enrichment.failures);
+    workTracking = enrichment.report;
+  }
+
   const result = buildRunResult({
     config,
     authenticatedUser: authenticatedUser.login,
@@ -194,6 +228,7 @@ export async function runApp(
     repositoriesDiscovered: discoveredRepositories.length,
     repositoriesIncluded: filtered.passedFilters.length,
     scannedRepositoryCount: filtered.scannable.length,
+    ...(workTracking ? { workTracking } : {}),
     observations,
     repositoryMap,
     skippedRepositories: [...filtered.skipped, ...dynamicSkips],
@@ -326,6 +361,37 @@ async function enrichDiffStats(
   });
 
   return failures;
+}
+
+function requireWorkTrackingClient(client: GitHubClientLike): WorkTrackingClient {
+  const { getProjectBoard, getIssuesBatch, getPullRequestsBatch, getCommitPullRequestsBatch } = client;
+  if (!getProjectBoard || !getIssuesBatch || !getPullRequestsBatch || !getCommitPullRequestsBatch) {
+    throw new Error("`--enrich-tasks` is not supported by this GitHub client.");
+  }
+  return {
+    getProjectBoard: getProjectBoard.bind(client),
+    getIssuesBatch: getIssuesBatch.bind(client),
+    getPullRequestsBatch: getPullRequestsBatch.bind(client),
+    getCommitPullRequestsBatch: getCommitPullRequestsBatch.bind(client),
+  };
+}
+
+async function loadBoard(
+  client: WorkTrackingClient,
+  config: NormalizedConfig,
+): Promise<GhBoard | null> {
+  const settings = config.workTracking;
+  if (!settings) {
+    return null;
+  }
+  try {
+    return await client.getProjectBoard(settings.project);
+  } catch (error) {
+    throw new Error(
+      `Work tracking: could not read project ${settings.project.owner}/${settings.project.number}: ${toErrorMessage(error)}. ` +
+        'Reading GitHub Projects needs the gh "project" scope: gh auth refresh -h github.com -s project',
+    );
+  }
 }
 
 async function defaultWriteJson(outputPath: string, result: RunResult): Promise<void> {

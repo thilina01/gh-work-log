@@ -22,6 +22,12 @@ import { assertSinceBeforeUntil, parseSince, parseUntil } from "./utils/dates";
 import { toErrorMessage } from "./utils/errors";
 import { compileBranchPatterns } from "./utils/patterns";
 import { optionalBoolean, optionalString, optionalStringArray } from "./utils/validation";
+import {
+  normalizeWorkTracking,
+  parseTaskDetail,
+  parseWorkTrackingLocalConfig,
+} from "./work-tracking/config";
+import { WorkTrackingLocalConfig } from "./work-tracking/types";
 
 export { DEFAULT_LOCAL_CONFIG_FILE, DEFAULT_OUTPUT_DIR };
 
@@ -40,6 +46,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     detectWip: false,
     classifyMessages: false,
     enrichPrs: false,
+    enrichTasks: false,
     ignoreLocalConfig: false,
     verbose: false,
     dryRun: false,
@@ -127,6 +134,24 @@ export function loadLocalConfigFile(
   return validateLocalConfigFile(parsed, fileName);
 }
 
+/**
+ * Loads a file that holds only a `workTracking` object (the same keys as the
+ * local config file's `workTracking` block). Used by `--work-tracking-config`.
+ */
+export function loadWorkTrackingConfigFile(filePath: string): WorkTrackingLocalConfig {
+  const fileName = path.basename(filePath);
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Work tracking configuration file not found: ${filePath}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(`Failed to parse ${fileName}: ${toErrorMessage(error)}`);
+  }
+  return parseWorkTrackingLocalConfig(parsed, fileName, "");
+}
+
 export function mergeCliOptions(
   cliOptions: CliOptions,
   localConfig: LocalConfigFile,
@@ -177,6 +202,7 @@ export function buildEffectiveConfigSnapshot(params: {
   localConfig: LocalConfigFile;
   configFilePath: string | null;
   configFileLoaded: boolean;
+  workTrackingConfigPath?: string | null;
 }): {
   configFile: { path: string | null; loaded: boolean };
   values: Record<string, unknown>;
@@ -225,6 +251,10 @@ export function buildEffectiveConfigSnapshot(params: {
       detectWip: config.detectWip,
       classifyMessages: config.classifyMessages,
       enrichPrs: config.enrichPrs,
+      enrichTasks: config.enrichTasks,
+      taskDetail: config.taskDetail,
+      workTrackingConfig: params.workTrackingConfigPath ?? null,
+      workTracking: config.workTracking,
       ignoreLocalConfig: config.ignoreLocalConfig,
       dryRun: config.dryRun,
       html: options.html,
@@ -236,13 +266,21 @@ export function buildEffectiveConfigSnapshot(params: {
     sources: {
       ...sources,
       configFile: options.configFile ? "command line" : "default",
+      workTracking: params.workTrackingConfigPath
+        ? "work tracking config file"
+        : localConfig.workTracking !== undefined
+          ? "local config"
+          : "default",
       concurrency: "built-in",
       retryPolicy: "built-in",
     },
   };
 }
 
-export function normalizeConfig(options: CliOptions): NormalizedConfig {
+export function normalizeConfig(
+  options: CliOptions,
+  workTracking?: WorkTrackingLocalConfig,
+): NormalizedConfig {
   if (!options.since || !options.until) {
     throw new Error("`--since` and `--until` are required.");
   }
@@ -289,6 +327,9 @@ export function normalizeConfig(options: CliOptions): NormalizedConfig {
     detectWip: options.detectWip,
     classifyMessages: options.classifyMessages,
     enrichPrs: options.enrichPrs,
+    enrichTasks: options.enrichTasks,
+    taskDetail: parseTaskDetail(options.taskDetail),
+    workTracking: normalizeWorkTracking(workTracking, options.enrichTasks),
     ignoreLocalConfig: options.ignoreLocalConfig,
     verbose: options.verbose,
     dryRun: options.dryRun,
@@ -465,6 +506,13 @@ function validateLocalConfigFile(
         result[definition.localConfigKey] = parsed;
       }
     }
+  }
+
+  if (value.workTracking !== undefined) {
+    return {
+      ...(result as LocalConfigFile),
+      workTracking: parseWorkTrackingLocalConfig(value.workTracking, fileName),
+    };
   }
 
   return result as LocalConfigFile;

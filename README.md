@@ -18,6 +18,7 @@ This README is the single source of truth for the current implementation: behavi
 - Optionally enriches commits with diff stats
 - Optionally classifies commit messages
 - Optionally flags WIP commits heuristically
+- Optionally links commits to tasks on a GitHub Projects board and exports task, sub-issue, and pull request records for reporting (`--enrich-tasks`)
 - Writes deterministic JSON output with metadata, statistics, failures, and normalized commit data
 - Generates a standalone HTML dashboard from the JSON output
 
@@ -68,8 +69,13 @@ What the tool expects from `gh`:
 - `gh auth status` succeeds
 - `gh api /user` returns the authenticated account
 - the account has access to the repositories you want to scan
+- for `--enrich-tasks` only: the token has the `project` scope, which reading a GitHub Projects board requires. `gh auth status` lists the token scopes; add it with:
 
-If `gh auth status` reports an invalid token, the scan will fail before repository discovery starts.
+```bash
+gh auth refresh -h github.com -s project
+```
+
+If `gh auth status` reports an invalid token, the scan will fail before repository discovery starts. If the board cannot be read, an `--enrich-tasks` run stops before scanning and prints the command above.
 
 ## Install And Build
 
@@ -165,6 +171,21 @@ node dist/cli.js \
   --classify-messages
 ```
 
+Task-linked scan example (needs a `workTracking` block in the local config or a `--work-tracking-config` file; see [Work Tracking](#work-tracking-github-projects)):
+
+```bash
+node dist/cli.js \
+  --since 2026-10-01 \
+  --until 2026-10-31 \
+  --include-org acme \
+  --organization-report \
+  --include-diff-stats \
+  --enrich-tasks \
+  --html
+```
+
+Each commit gets a `workLink` to its task, sub-issue, and pull request, and the report gets a `workTracking` section with those records. Use `--task-detail summary` or `--task-detail none` to keep task and pull request text out of the report. When `enrichTasks` is set in the local config, `--no-enrich-tasks` turns it off for one run.
+
 One-shot JSON + HTML example:
 
 ```bash
@@ -240,6 +261,9 @@ Optional enrichments and execution flags:
 - `--detect-wip`
 - `--classify-messages`
 - `--enrich-prs`: attach associated pull request number/url/title/state (inspection hint only; default off)
+- `--enrich-tasks`: link commits to tasks on the GitHub Projects board configured in `workTracking` (see [Work Tracking](#work-tracking-github-projects); default off)
+- `--task-detail`: task and pull request text kept in the report: `none`, `summary`, or `full` (default `full`)
+- `--work-tracking-config`: load the `workTracking` settings from a JSON file instead of the local config file. Unlike the local config, it can be combined with `--ignore-local-config`, so a scan that must not depend on local defaults can still link tasks
 - `--ignore-local-config`: ignore `.gh-work-log.local.json` and use CLI flags only
 - `--show-config`: print the effective normalized configuration and exit without contacting GitHub
 - `--dry-run`
@@ -254,7 +278,7 @@ When a local checkout’s `src/` is newer than `dist/cli.js`, the CLI prints a s
 
 ### Report profiles
 
-Profiles reshape JSON/HTML packaging only. They do **not** change discovery, filtering, or commit scanning.
+Profiles reshape JSON/HTML packaging only. They do **not** change discovery, filtering, or commit scanning. The `workTracking` section and commit `workLink` fields are the same in every profile; `--task-detail` controls how much text they carry.
 
 | Profile | Intended use | Skip packaging | Extra packaging |
 |---|---|---|---|
@@ -274,16 +298,20 @@ node dist/cli.js \
   --html \
   --output ./tmp/report-management.json
 
-# Profile agent discovery (employer / org scope)
+# Profile agent discovery (employer / org scope), linked to the org's board
+# with a versioned work-tracking file so the scan ignores local defaults
 node dist/cli.js \
   --since 2026-03-01 \
   --until 2026-04-01 \
+  --ignore-local-config \
   --include-org OTR-Lanka \
   --profile agent \
   --include-diff-stats \
   --detect-wip \
   --classify-messages \
   --enrich-prs \
+  --enrich-tasks \
+  --work-tracking-config ./path/to/work-tracking.json \
   --output ./tmp/report-agent.json
 
 # Personal-project agent scan from the gh-work-log checkout
@@ -302,11 +330,11 @@ node dist/cli.js \
 
 ## Local Config File
 
-The CLI loads `.gh-work-log.local.json` from the current working directory by default. Relative paths passed to `--config` are also resolved from the current working directory; absolute paths are accepted. Use this for reusable identity, repository-filter, branch-scan, and report defaults. An explicitly selected missing config file is an error, while a missing default file is ignored.
+The CLI loads `.gh-work-log.local.json` from the current working directory by default. Relative paths passed to `--config` are also resolved from the current working directory; absolute paths are accepted. Use this for reusable identity, repository-filter, branch-scan, enrichment, and report defaults, and for the `workTracking` board settings (which can also come from a `--work-tracking-config` file). An explicitly selected missing config file is an error, while a missing default file is ignored.
 
 Precedence is built-in defaults < local config < CLI. A CLI scalar or boolean overrides the local value; use `--no-<flag>` to explicitly turn off a boolean enabled in the file. A CLI list replaces that setting's local list, while repeated CLI flags and comma-separated values build the CLI list. Use `--ignore-local-config` to bypass the default file; it cannot be combined with `--config`.
 
-Run `--show-config` with the required date range to inspect the normalized settings and their source before scanning. This exits without contacting GitHub. Email values are redacted in the preview.
+Run `--show-config` with the required date range to inspect the normalized settings and their source before scanning. This exits without contacting GitHub. Email values are redacted in the preview. The preview also shows the normalized `workTracking` settings, with defaults filled in, and reports a malformed block before any scan starts. Its `sources.workTracking` is `local config`, `work tracking config file` (with the path in `values.workTrackingConfig`), or `default`.
 
 Most users will not need to set `author` here, because the tool already defaults to the authenticated `gh` login. Keep `author` only if you intentionally want a persistent override.
 
@@ -324,6 +352,9 @@ Supported keys:
 - `includeDiffStats`
 - `detectWip`
 - `classifyMessages`
+- `enrichTasks`
+- `taskDetail`
+- `workTracking` (an object; see [Work Tracking](#work-tracking-github-projects))
 - `profile`
 - `verbose`
 
@@ -355,7 +386,9 @@ Example:
 }
 ```
 
-There is also a tracked example file at [.gh-work-log.local.example.json](.gh-work-log.local.example.json).
+A `workTracking` block is validated when the file is loaded: unknown keys and wrongly typed values are errors, whether or not `enrichTasks` is on. See [Work Tracking](#work-tracking-github-projects) for its keys and a complete example.
+
+There is also a tracked example file at [.gh-work-log.local.example.json](.gh-work-log.local.example.json). It includes a placeholder `workTracking` block with `enrichTasks` off; replace the `acme` values with your board before turning it on.
 
 Example preview:
 
@@ -367,6 +400,91 @@ node dist/cli.js \
   --no-scan-feature-branches \
   --show-config
 ```
+
+## Work Tracking (GitHub Projects)
+
+`--enrich-tasks` links each scanned commit to a task on a GitHub Projects board and adds a `workTracking` section to the report with the tasks, their sub-issues, and the pull requests behind the commits. The aim is a JSON file rich enough to generate work logs, release notes, and management reports from: what was delivered, for which request, through which pull requests.
+
+Terms are generic. A **task** is a top-level issue (one with no parent); a **sub-issue** is an issue with a parent, typically one per repository that changes. Both are usually items on the board.
+
+Requirements:
+
+- the `gh` token needs the `project` scope to read the board: `gh auth refresh -h github.com -s project`. The run stops before scanning with this hint when the board cannot be read.
+- work tracking settings, from either:
+  - a `workTracking` block in the local config file, or
+  - a JSON file passed with `--work-tracking-config <file>` that holds the same object on its own (the keys below, without the `workTracking` wrapper). The file replaces the local block when both exist, and it works with `--ignore-local-config`. Keep the file under version control when scans must be reproducible; the report records the settings it used in `workTracking.settings`.
+
+`workTracking` keys:
+
+| Key | Required | Meaning |
+|---|---|---|
+| `projectOwner` | yes | Login of the organization or user that owns the board |
+| `projectNumber` | yes | Board number (from the board URL) |
+| `projectOwnerType` | no | `organization` (default) or `user` |
+| `taskRepository` | no | `owner/name` repository that bare task numbers resolve against (branch names, `#N` in the task trailer) |
+| `repositoryOwners` | no | Owners whose repositories are linked; others are `out_of_scope_repository`. Default: `projectOwner` |
+| `exemptRepositories` | no | `owner/name` repositories whose work needs no task; their commits are `exempt_repository` unless they match a merge commit. They are still scanned and reported; use `excludeRepos` to leave a repository out of the report |
+| `branchTaskPattern` | no | Regular expression with one capture group for the task number in a branch name; requires `taskRepository` |
+| `taskTrailer` | no | Pull request body line naming the task, for example `Parent-Task` |
+| `subIssueTrailer` | no | Pull request body line naming the sub-issue, for example `Implementation-Issue` |
+| `taskSections` | no | Task body headings to extract. Default: `Description`, `Requirements`, `Acceptance Criteria` |
+| `taskFields` | no | Single-value task fields, read from a heading or a `> Name : value` footer line |
+| `pullRequestSections` | no | Pull request body headings to extract |
+
+Example for a board where tasks live in a dedicated `acme/tasks` repository, each product repository that changes gets a sub-issue, branches are named `<type>/<sub-issue>-wm<task>-<description>`, and pull request bodies end with `Parent-Task:` / `Implementation-Issue:` lines:
+
+```json
+{
+  "includeOrgs": ["acme"],
+  "enrichTasks": true,
+  "workTracking": {
+    "projectOwner": "acme",
+    "projectNumber": 5,
+    "taskRepository": "acme/tasks",
+    "branchTaskPattern": "-wm(\\d+)-",
+    "taskTrailer": "Parent-Task",
+    "subIssueTrailer": "Implementation-Issue",
+    "taskSections": ["Description", "Requirements", "Acceptance Criteria"],
+    "taskFields": ["Requested by"],
+    "pullRequestSections": ["Summary", "What to Review", "Test plan", "Notes"],
+    "exemptRepositories": ["acme/docs", "acme/gitops", "acme/tasks"]
+  }
+}
+```
+
+List every heading of your pull request template in `pullRequestSections`: an unlisted heading stays inside the section before it.
+
+How a commit is linked, in order:
+
+1. `merge_sha` (high confidence): the commit is the merge commit of a pull request that closed an issue on the board. The board read provides this for every board issue, so squash-merged work links with no extra requests.
+2. Pull request lookup, for in-scope commits that step 1 did not match. Associated pull requests are fetched in batches of 20 commits per GraphQL request, and the one merged as this commit (or else the earliest merged, or else an open one) is used:
+   - `pr_closing_ref` (high): an issue the pull request closes (`Closes #N`);
+   - `pr_trailer` (high): the `subIssueTrailer` or `taskTrailer` line. A bare `#N` in the sub-issue trailer is in the pull request's repository; in the task trailer it is in `taskRepository`;
+   - `pr_branch` (medium): `branchTaskPattern` on the pull request's head branch. Head branch names survive branch deletion after merge.
+3. `branch_name` (medium): `branchTaskPattern` on a branch the commit was scanned on. With `--scan-feature-branches`, this links unmerged work.
+
+The linked issue is resolved to its task by following parent links. Issues that are not on the board (for example a parent task that was never added) are fetched in batches and marked `onBoard: false`; a link to a task that is not on the board has medium confidence.
+
+`exemptRepositories` and `repositoryOwners` affect linking only. Commits in exempt or out-of-scope repositories are still scanned and appear in `data`, the statistics, and the dashboard like any other commit; they are just not looked up against pull requests. To leave a repository out of the report entirely, use `excludeRepos` (or `--exclude-repo`), which skips it before scanning.
+
+Commits that are not linked carry an `unlinkedReason`: `out_of_scope_repository`, `exempt_repository`, `no_pull_request` (pushed directly, or merged without a pull request), `pull_request_without_task`, or `lookup_failed`. Unlinked commits with a pull request keep its key, and the pull request's record is still exported, so untracked work can be reported too.
+
+Lookup failures after the board read are recorded in `failures` with stage `work_tracking`; the scan still completes.
+
+Text detail (`--task-detail`):
+
+- `full` (default): parsed task sections and fields, sub-issue bodies, and pull request sections. A task body without the configured headings is kept whole as `body`.
+- `summary`: task fields (such as `Requested by`) and pull request trailers only.
+- `none`: no body text; titles, fields from the board, and trailers remain.
+
+Images, HTML comments, and empty form answers (`_No response_`) are removed from all text.
+
+Caveats:
+
+- Board `status` is read when the scan runs (`workTracking.board.snapshotAt`), not as of `--until`. Re-running a past period can show later statuses.
+- For squash-merged work, one commit appears per pull request and its authored date is the merge time. A pull request's `commitCount` is the number of original commits on its (possibly deleted) branch.
+- Only tasks that scanned commits link to are exported, with all of their sub-issues from the board. A sub-issue's `closingPullRequests` may name pull requests outside the scanned range; those have no record, and the task's `completeness` includes `pull_requests_outside_scan`.
+- Pull requests merged before a team adopted closing references or trailers link only through branch names or not at all; check `workTracking.coverage`.
 
 ## Scan Semantics
 
@@ -450,6 +568,11 @@ GraphQL:
 - `repository.ref(qualifiedName: ...).target.history(first: 100, after: $after, since: $since, until: $until, author: $author)`
 - Each history node includes `parents(first: 2) { totalCount nodes { author { email user { login } } } }`, used to detect merge commits and whether the merged-in branch was authored by someone else. Organization reports omit email fields and also request the top-level Git author name for unlinked-author display.
 
+With `--enrich-tasks`, work tracking adds GraphQL requests:
+
+- one paginated read of the board: `organization|user(login).projectV2(number).items(first: 50)` with each issue's fields, parent, issue field values (such as Priority), and the pull requests that closed it with their merge commits
+- batched lookups of up to 20 aliased items per request: `repository.object(oid).associatedPullRequests` for commits, `repository.pullRequest(number)` for pull request details, and `repository.issue(number)` for issues not on the board. A batch keeps the data of items that resolve when others do not exist.
+
 For regular reports, the GraphQL history query is run once for the target GitHub user id and once more for configured email aliases when email matching is enabled. Organization reports query all authors in the selected repositories and date range, request the Git author name, and omit author email fields. Results are range-filtered again by authored date to preserve the inclusive/exclusive contract.
 
 API responses are checked against the fields used by the application before
@@ -466,12 +589,14 @@ Every report includes these top-level sections:
 - `failures`
 - `data`
 
-The visualizer accepts report schema versions `1.2.0`, `1.3.0`, and `1.4.0` and validates the report's
+Reports generated with `--enrich-tasks` (and not `--dry-run`) also include a top-level `workTracking` section.
+
+The visualizer accepts report schema versions `1.2.0`, `1.3.0`, `1.4.0`, and `1.5.0` and validates the report's
 required metadata, statistics, failures, and commit fields before rendering.
 Malformed JSON, unsupported schema versions, and incorrectly typed fields
 produce an explicit error. Optional report enrichments remain optional.
 
-Reports generated by the current CLI use schema version `1.4.0` and include
+Reports generated by the current CLI use schema version `1.5.0` and include
 `metadata.reportMode` (`author` or `organization`). Organization reports also
 include `statistics.contributors`, a summary of unique commits and repositories
 per observed GitHub login. Unlinked authors have a `null` login and are grouped
@@ -483,12 +608,12 @@ treated as a verified account.
 
 High-level metadata includes:
 
-- schema version (`1.2.0`, `1.3.0`, or `1.4.0`); `1.3.0` adds report mode and optional contributor summaries, while `1.4.0` adds organization-only commit author names
+- schema version (`1.2.0` to `1.5.0`); `1.3.0` adds report mode and optional contributor summaries, `1.4.0` adds organization-only commit author names, and `1.5.0` adds `enrichTasks`, `taskDetail`, commit `workLink`, and the `workTracking` section
 - generated timestamp
 - authenticated user
 - target author
 - normalized `since` and `until`
-- scan mode and feature flags (`detectWip`, `includeDiffStats`, `classifyMessages`, `enrichPrs`, `ignoreLocalConfig`, `dryRun`)
+- scan mode and feature flags (`detectWip`, `includeDiffStats`, `classifyMessages`, `enrichPrs`, `enrichTasks`, `ignoreLocalConfig`, `dryRun`), and `taskDetail` when `enrichTasks` is true
 - report `profile`
 - applied `filters` (`includeOrgs`, `excludeOrgs`, `includeRepos`, `excludeRepos`, `ownedOnly`, `branchPatterns`)
 - `tool` identity (`name`, `packageVersion`)
@@ -507,6 +632,18 @@ Statistics includes:
 - optional `hints.candidateGroups` for `agent` only (non-authoritative triage; not achievements)
 
 Commit records may include `associatedPullRequests` when `--enrich-prs` is enabled. Each entry has `number`, `url`, `title`, and `state` only. Treat these as inspection hints, never as profile evidence by themselves.
+
+With `--enrich-tasks` (and not `--dry-run`), every commit has a `workLink` and the report has a top-level `workTracking` section:
+
+- `workLink`: `status` (`linked` or `unlinked`), `task`, `subIssue`, `pullRequest` (keys or `null`), `linkSource`, `confidence` (`high` or `medium`), and `unlinkedReason`
+- `workTracking.board`: owner, number, title, URL, item count, and `snapshotAt`
+- `workTracking.settings`: the normalized work tracking settings the report was linked with (project, task repository, owners, exempt repositories, branch pattern, trailers, and section and field names)
+- `workTracking.coverage`: commits, linked and unlinked counts, `linkedBySource`, and `unlinkedByReason`
+- `workTracking.tasks`: keyed by `owner/repo#number`. Title, URL, state and reason, issue type, labels, assignees, milestone, dates, `onBoard`, board `status`, other board fields (`boardFields`, such as Module), organization issue fields (`issueFields`, such as Priority), parsed `fields` and `sections` (by detail level), `subIssues`, `pullRequests`, `activity` (commit count, repositories, first and last commit, diff totals with `--include-diff-stats`, and commits per author), and `completeness` notes (`not_on_board`, `sections_not_found`, `body_empty`, `pull_requests_outside_scan`)
+- `workTracking.subIssues`: repository, title, state, assignees, dates, board status, `task`, `parent`, `closingPullRequests`, and the body at full detail
+- `workTracking.pullRequests`: title, state, draft flag, created/merged/closed times, author, merged by, head and base branch, merge commit, size, original commit count, labels, reviews (author, state, time), closing issues, linked `task` and `subIssue`, `trailers`, and parsed `sections` at full detail
+
+Records are sorted by key, and every `workLink.task` and `workLink.subIssue` refers to a record in the report; the validator checks this. Organization reports contain logins only, never email addresses.
 
 Skip categories:
 
@@ -538,6 +675,7 @@ Commit records include:
 - external-author merge flag and the merged branch's author login (or email)
 - optional diff stats
 - optional message category
+- `workLink` when `--enrich-tasks` is enabled
 
 Deterministic ordering:
 
@@ -570,7 +708,8 @@ The `All Commits` tab supports:
 - the merge commit filter can show all commits, merge commits only, or exclude merge commits entirely
 - the external-author filter isolates merges of your own work from merges that bring in another author's branch, or excludes the latter entirely
 - the `Author` column and filter show the commit's own author for regular commits, or the merged branch's tip commit author for merge commits, highlighted when it differs from the target author
-- free-text search includes repository, canonical branch, scan branch, SHA, and message text
+- free-text search includes repository, canonical branch, scan branch, SHA, and message text, plus the linked task key and title when `--enrich-tasks` was used
+- with `--enrich-tasks`, linked commits show a task chip (`#125`) next to the message, linking to the task and showing its title and board status on hover
 - show/hide column controls
 - sorting on `Authored` and `Repository`
 - clickable SHA links that open the commit on GitHub
@@ -594,6 +733,7 @@ Project entry points:
 - GitHub command execution, retries, and response validation: [src/github/command-api.ts](src/github/command-api.ts) and [src/github/response-schemas.ts](src/github/response-schemas.ts)
 - Subprocess runner and repository mapping: [src/github/command-runner.ts](src/github/command-runner.ts) and [src/github/repository-mapper.ts](src/github/repository-mapper.ts)
 - Imported report validation: [src/report-validation.ts](src/report-validation.ts)
+- Work tracking (`--enrich-tasks`): [src/work-tracking/](src/work-tracking) — `config.ts` (settings), `graphql.ts` (queries and response mapping), `text.ts` (issue keys, trailers, body sections), `link.ts` (linking rules), `enrich.ts` (lookups and batching), `report.ts` (the `workTracking` section)
 - HTML visualizer entry: [src/visualize.ts](src/visualize.ts)
 - HTML renderer: [src/visualizer/render.ts](src/visualizer/render.ts)
 - Dashboard client-side script (typed source): [src/visualizer/browser-client.ts](src/visualizer/browser-client.ts) — compiled via `npm run generate:browser-client`; the compiled `browser-client.js` is committed and inlined into the generated HTML by `src/visualizer/browser-script.ts`
@@ -604,6 +744,7 @@ Test coverage:
 - API-client tests for response validation, pagination, retries, and mapping
 - browser-DOM tests for dashboard filtering and sorting
 - integration tests for app behavior, concurrent branch discovery, globally bounded client operations, inline diff stats, and enrichment fallback concurrency
+- work-tracking tests for body and trailer parsing, every link source and unlinked reason, detail levels, batched-lookup partial data, schema 1.5.0 reference checks, and author and organization runs
 - per-repository summary statistics are accumulated in one pass over commit records
 - `npm run test:coverage` reports coverage and enforces the configured thresholds
 
@@ -615,7 +756,8 @@ Repository quality gates:
 
 ## Notes And Constraints
 
-- Output files may contain private repository names, URLs, and commit metadata; handle them as sensitive artifacts
+- Output files may contain private repository names, URLs, and commit metadata; handle them as sensitive artifacts. With `--enrich-tasks` at the default `full` detail they also contain task requirements and pull request descriptions; use `--task-detail summary` or `none` for reports you share more widely
 - The viewer is generated from JSON and must be regenerated when the JSON changes
 - WIP detection is heuristic and may not match every workflow perfectly
 - The current implementation relies on `gh` authentication; PAT support is not implemented
+- Work tracking reads one GitHub Projects (v2) board per run. Board status is a snapshot from when the scan runs, and status history is not collected

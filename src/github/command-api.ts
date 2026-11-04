@@ -96,10 +96,63 @@ export class GitHubCommandApi {
     return parsed.data;
   }
 
+  /**
+   * Like `postGraphql`, but keeps the data of a partially successful query
+   * (for example a batch of aliased lookups where one issue does not exist)
+   * and returns the GraphQL errors alongside it. Throws only when no data was
+   * returned at all.
+   */
+  public async postGraphqlPartial<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    errorType: string,
+    isExpected: (value: unknown) => value is T,
+  ): Promise<{ data: T; errors: Array<{ message: string; path?: unknown }> }> {
+    const payload = JSON.stringify({ query, variables });
+    const result = await this.runGh(
+      [
+        "api",
+        "graphql",
+        "--method",
+        "POST",
+        "--input",
+        "-",
+        "-H",
+        "Accept: application/vnd.github+json",
+        "-H",
+        `X-GitHub-Api-Version: ${REST_API_VERSION}`,
+      ],
+      errorType,
+      payload,
+      true,
+    );
+    const parsed = parseJson(result.stdout, errorType);
+    if (!isRecord(parsed)) {
+      throw invalidPayload(errorType);
+    }
+    if (parsed.errors !== undefined && !isGraphqlErrors(parsed.errors)) {
+      throw invalidPayload(errorType);
+    }
+    const errors = (parsed.errors ?? []) as Array<{ message: string; path?: unknown }>;
+    if (!isRecord(parsed.data)) {
+      throw new GitHubApiError(
+        errors[0]?.message ?? "GitHub GraphQL response was missing data.",
+        errorType,
+        undefined,
+        0,
+      );
+    }
+    if (!isExpected(parsed.data)) {
+      throw invalidPayload(errorType);
+    }
+    return { data: parsed.data, errors };
+  }
+
   public async runGh(
     args: string[],
     errorType: string,
     input?: string,
+    allowPartialGraphqlData = false,
   ): Promise<GitHubRunnerResult> {
     for (let attempt = 0; attempt <= this.config.retryPolicy.maxRetries; attempt += 1) {
       this.logger.debug(`Running gh ${args.join(" ")}`);
@@ -110,6 +163,9 @@ export class GitHubCommandApi {
       );
 
       if (result.exitCode === 0) {
+        return result;
+      }
+      if (allowPartialGraphqlData && hasGraphqlData(result.stdout)) {
         return result;
       }
 
@@ -160,6 +216,15 @@ function parseJson(value: string, errorType: string): unknown {
       undefined,
       0,
     );
+  }
+}
+
+function hasGraphqlData(stdout: string): boolean {
+  try {
+    const parsed = JSON.parse(stdout) as unknown;
+    return isRecord(parsed) && isRecord(parsed.data);
+  } catch {
+    return false;
   }
 }
 

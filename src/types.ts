@@ -1,3 +1,11 @@
+import {
+  CommitWorkLink,
+  TaskDetailLevel,
+  WorkTrackingLocalConfig,
+  WorkTrackingReport,
+  WorkTrackingSettings,
+} from "./work-tracking/types";
+
 export type ScanMode = "default_branch" | "default_and_feature_branches";
 export type SourceMode = "default_branch" | "feature_branch";
 export type ReportProfile = "operator" | "management" | "agent";
@@ -31,6 +39,9 @@ export interface CliOptions {
   detectWip: boolean;
   classifyMessages: boolean;
   enrichPrs: boolean;
+  enrichTasks: boolean;
+  taskDetail?: string;
+  workTrackingConfig?: string;
   ignoreLocalConfig: boolean;
   verbose: boolean;
   dryRun: boolean;
@@ -54,6 +65,9 @@ export interface LocalConfigFile {
   includeDiffStats?: boolean;
   detectWip?: boolean;
   classifyMessages?: boolean;
+  enrichTasks?: boolean;
+  taskDetail?: string;
+  workTracking?: WorkTrackingLocalConfig;
   verbose?: boolean;
   profile?: string;
 }
@@ -88,6 +102,9 @@ export interface NormalizedConfig {
   detectWip: boolean;
   classifyMessages: boolean;
   enrichPrs: boolean;
+  enrichTasks: boolean;
+  taskDetail: TaskDetailLevel;
+  workTracking: WorkTrackingSettings | null;
   ignoreLocalConfig: boolean;
   verbose: boolean;
   dryRun: boolean;
@@ -231,6 +248,8 @@ export interface CommitRecord extends Partial<CommitDiffStats> {
   messageCategory?: MessageCategory;
   /** Inspection hint only; never treat title/state as profile evidence. */
   associatedPullRequests?: AssociatedPullRequest[];
+  /** Present when `--enrich-tasks` is enabled (schema 1.5.0). */
+  workLink?: CommitWorkLink;
 }
 
 export interface RepositorySummary {
@@ -321,7 +340,7 @@ export interface ContributorSummary {
 }
 
 export interface RunMetadata {
-  schemaVersion: "1.2.0" | "1.3.0" | "1.4.0";
+  schemaVersion: "1.2.0" | "1.3.0" | "1.4.0" | "1.5.0";
   reportMode?: ReportMode;
   generatedAt: string;
   authenticatedUser: string;
@@ -334,6 +353,10 @@ export interface RunMetadata {
   includeDiffStats: boolean;
   classifyMessages: boolean;
   enrichPrs: boolean;
+  /** Required from schema 1.5.0. */
+  enrichTasks?: boolean;
+  /** Present when `enrichTasks` is true. */
+  taskDetail?: TaskDetailLevel;
   ignoreLocalConfig: boolean;
   dryRun: boolean;
   profile: ReportProfile;
@@ -348,6 +371,8 @@ export interface RunResult {
   statistics: Statistics;
   failures: FailureRecord[];
   data: CommitRecord[];
+  /** Present when `--enrich-tasks` is enabled and the run was not a dry run. */
+  workTracking?: WorkTrackingReport;
 }
 
 export interface GitHubRunnerResult {

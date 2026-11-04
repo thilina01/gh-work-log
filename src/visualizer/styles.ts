@@ -758,6 +758,24 @@ export const VISUALIZER_STYLES = `
         letter-spacing: 0.08em;
       }
 
+      .task-chip {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid rgba(18, 116, 117, 0.3);
+        color: #127475;
+        font-size: 11px;
+        font-weight: 600;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      body[data-theme="dark"] .task-chip {
+        border-color: rgba(120, 210, 210, 0.35);
+        color: #8fdcdc;
+      }
+
       body[data-theme="dark"] .chip {
         background: rgba(237, 243, 255, 0.12);
         border-color: rgba(190, 208, 234, 0.18);

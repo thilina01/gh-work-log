@@ -161,6 +161,29 @@ function exportFilteredCommitsToCsv() {
     link.remove();
     URL.revokeObjectURL(url);
 }
+function linkedTask(row) {
+    const key = row.workLink?.task;
+    if (!key) {
+        return null;
+    }
+    return { key, task: DASHBOARD_DATA.workTasks?.[key] };
+}
+function taskSearchText(row) {
+    const linked = linkedTask(row);
+    return linked ? linked.key + " " + (linked.task?.title ?? "") : "";
+}
+function renderTaskChip(row) {
+    const linked = linkedTask(row);
+    if (!linked) {
+        return "";
+    }
+    const number = linked.key.slice(linked.key.lastIndexOf("#"));
+    const title = linked.key + (linked.task ? " - " + linked.task.title + (linked.task.status ? " (" + linked.task.status + ")" : "") : "");
+    const label = escapeBrowserHtml(number);
+    return linked.task
+        ? ' <a class="task-chip" href="' + escapeBrowserHtml(linked.task.url) + '" target="_blank" rel="noreferrer noopener" title="' + escapeBrowserHtml(title) + '">' + label + '</a>'
+        : ' <span class="task-chip" title="' + escapeBrowserHtml(title) + '">' + label + '</span>';
+}
 function escapeBrowserHtml(value) {
     return String(value)
         .replace(/&/g, "&amp;")
@@ -250,6 +273,7 @@ function renderRows() {
             row.sha,
             row.message,
             resolveAuthorLabel(row),
+            taskSearchText(row),
         ].join(" ").toLowerCase();
         return haystack.includes(query);
     }).sort(compareRows);
@@ -273,13 +297,14 @@ function renderRows() {
         const expandBtn = body
             ? ' <button type="button" class="commit-expand-btn" data-toggle-subrow="' + index + '" title="Toggle full description">&hellip;</button>'
             : '';
+        const taskChip = renderTaskChip(row);
         const mainRow = '<tr class="commit-row">' +
             '<td data-column="authored">' + escapeBrowserHtml(formatShortDate(row.authoredDateTime)) + '</td>' +
             '<td data-column="repository">' + formatRepoName(row.repository) + '</td>' +
             '<td data-column="branch">' + escapeBrowserHtml(row.branch) + '</td>' +
             '<td data-column="scanBranch">' + escapeBrowserHtml(row.scanBranch) + '</td>' +
             '<td data-column="sha"><a class="sha-link" href="' + escapeBrowserHtml(row.url) + '" target="_blank" rel="noreferrer noopener"><code>' + escapeBrowserHtml(shortSha) + '</code></a></td>' +
-            '<td data-column="message"><div class="commit-msg-cell"><span class="commit-subject">' + escapeBrowserHtml(subject) + '</span>' + expandBtn + '</div></td>' +
+            '<td data-column="message"><div class="commit-msg-cell"><span class="commit-subject">' + escapeBrowserHtml(subject) + '</span>' + taskChip + expandBtn + '</div></td>' +
             '<td data-column="wip">' + badge + '</td>' +
             '<td data-column="merge">' + mergeBadge + '</td>' +
             '<td data-column="mergeAuthor">' + mergeAuthorBadge + '</td>' +

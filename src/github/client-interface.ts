@@ -4,8 +4,9 @@ import {
   RepositoryRecord,
   TargetIdentity,
 } from "../types";
+import { WorkTrackingClient } from "../work-tracking/types";
 
-export interface GitHubClientLike {
+export interface GitHubClientLike extends Partial<WorkTrackingClient> {
   validateGhInstallation(): Promise<void>;
   validateAuthentication(): Promise<void>;
   getAuthenticatedUser(): Promise<{ login: string; id: string }>;

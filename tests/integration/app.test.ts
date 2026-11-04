@@ -22,6 +22,9 @@ function makeConfig(overrides: Partial<NormalizedConfig> = {}): NormalizedConfig
     detectWip: true,
     classifyMessages: true,
     enrichPrs: false,
+    enrichTasks: false,
+    taskDetail: "full",
+    workTracking: null,
     ignoreLocalConfig: false,
     verbose: false,
     dryRun: false,
@@ -404,7 +407,7 @@ describe("runApp", () => {
       repositoriesDiscovered: 2,
       repositoriesIncluded: 2,
     });
-    expect(result.metadata.schemaVersion).toBe("1.4.0");
+    expect(result.metadata.schemaVersion).toBe("1.5.0");
     expect(result.metadata.profile).toBe("operator");
     expect(result.metadata.tool.name).toBe("gh-work-log");
     expect(result.metadata.ignoreLocalConfig).toBe(false);

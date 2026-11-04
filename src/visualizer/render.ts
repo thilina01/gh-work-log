@@ -26,6 +26,16 @@ export function renderHtmlReport(report: RunResult): string {
     failures: report.failures,
     skippedRepositories: report.statistics.skippedRepositories,
     commits: report.data,
+    ...(report.workTracking
+      ? {
+          workTasks: Object.fromEntries(
+            Object.values(report.workTracking.tasks).map((task) => [
+              task.key,
+              { title: task.title, url: task.url, status: task.status },
+            ]),
+          ),
+        }
+      : {}),
   };
 
   return `<!doctype html>

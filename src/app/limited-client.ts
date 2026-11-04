@@ -8,6 +8,10 @@ export function limitGitHubClient(
 ): GitHubClientLike {
   const getAssociatedPullRequests =
     client.getAssociatedPullRequests?.bind(client);
+  const getProjectBoard = client.getProjectBoard?.bind(client);
+  const getIssuesBatch = client.getIssuesBatch?.bind(client);
+  const getPullRequestsBatch = client.getPullRequestsBatch?.bind(client);
+  const getCommitPullRequestsBatch = client.getCommitPullRequestsBatch?.bind(client);
 
   return {
     validateGhInstallation: () =>
@@ -36,6 +40,21 @@ export function limitGitHubClient(
             semaphore.run(() =>
               getAssociatedPullRequests(repository, sha),
             ),
+        }
+      : {}),
+    ...(getProjectBoard
+      ? { getProjectBoard: (project) => semaphore.run(() => getProjectBoard(project)) }
+      : {}),
+    ...(getIssuesBatch
+      ? { getIssuesBatch: (keys) => semaphore.run(() => getIssuesBatch(keys)) }
+      : {}),
+    ...(getPullRequestsBatch
+      ? { getPullRequestsBatch: (keys) => semaphore.run(() => getPullRequestsBatch(keys)) }
+      : {}),
+    ...(getCommitPullRequestsBatch
+      ? {
+          getCommitPullRequestsBatch: (commits) =>
+            semaphore.run(() => getCommitPullRequestsBatch(commits)),
         }
       : {}),
   };
